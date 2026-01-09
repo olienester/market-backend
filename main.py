@@ -1,8 +1,9 @@
 from fastapi import FastAPI, HTTPException
 from services.market_data import get_stock_data
-import investpy
 import pandas as pd
 from datetime import datetime
+import requests          # <-- Novo (substitui investpy)
+from io import StringIO  # <-- Novo (necessário para o pandas ler o HTML)
 
 app = FastAPI(title="Market Data API")
 
