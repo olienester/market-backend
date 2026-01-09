@@ -2,7 +2,6 @@ fastapi
 uvicorn
 yfinance
 cachetools
-investpy==1.0.8
 pandas
 requests
 lxml
