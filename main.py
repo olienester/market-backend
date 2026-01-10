@@ -1,11 +1,8 @@
 from fastapi import FastAPI, HTTPException
 from services.market_data import get_stock_data
 import requests
-from googletrans import Translator
 
 app = FastAPI(title="Market Data API")
-
-translator = Translator()
 
 # ===============================
 # CONFIG RapidAPI
@@ -23,19 +20,6 @@ CALENDAR_PARAMS = {
     "countries": "BR,US",
     "importance": "HIGH"
 }
-
-
-# ===============================
-# Utils
-# ===============================
-def traduzir(texto: str):
-    if not texto:
-        return texto
-    try:
-        return translator.translate(texto, dest="pt").text
-    except:
-        return texto
-
 
 # ===============================
 # Endpoints
@@ -66,6 +50,9 @@ def stock(
 
 @app.get("/calendar")
 def get_calendar():
+    # ===============================
+    # Fallback de segurança
+    # ===============================
     mock_events = [
         {
             "id": "1",
@@ -93,15 +80,18 @@ def get_calendar():
         events = []
 
         for item in data:
-            if item.get("country") not in ["BR", "US"]:
+            country = item.get("country")
+
+            # Filtra apenas BR e US
+            if country not in ["BR", "US"]:
                 continue
 
             events.append({
                 "id": str(item.get("id")),
                 "time": item.get("time"),
-                "country": item.get("country"),
+                "country": country,
                 "impact": item.get("importance", "medium").lower(),
-                "title": traduzir(item.get("title")),
+                "title": item.get("title"),  # SEM tradução (estável)
                 "actual": item.get("actual", "-"),
                 "forecast": item.get("forecast", "-")
             })
@@ -109,5 +99,5 @@ def get_calendar():
         return events if events else mock_events
 
     except Exception as e:
-        print(e)
+        print("Erro no calendário:", e)
         return mock_events
