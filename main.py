@@ -141,32 +141,15 @@ def get_dividends(ticker: str):
 @app.get("/market/quote/{ticker}")
 def get_quote(ticker: str):
     try:
-        # LÓGICA INTELIGENTE:
-        # Se tiver "^" (Índice), "=" (Moeda) ou "-" (Cripto), NÃO coloca .SA
-        if "^" in ticker or "=" in ticker or "-" in ticker:
-            symbol = ticker
-        else:
-            # Se não tiver .SA e não for especial, adiciona .SA (para ações BR)
-            symbol = ticker.upper() if ticker.upper().endswith(".SA") else f"{ticker.upper()}.SA"
-
-        t = yf.Ticker(symbol)
-        # fast_info é mais rápido e confiável para cotação em tempo real no yfinance
-        price = t.fast_info.last_price
-        prev_close = t.fast_info.previous_close
-        
-        # Calcula variação manualmente se a API não entregar pronta
-        if price and prev_close:
-            change_pct = ((price - prev_close) / prev_close) * 100
-        else:
-            change_pct = 0
-
+        t = yf.Ticker(ticker + ".SA")
+        info = t.info
+        # O Yahoo Finance geralmente retorna 'regularMarketChangePercent'
         return {
-            "symbol": symbol,
-            "price": price,
-            "regularMarketChangePercent": change_pct
+            "symbol": ticker,
+            "price": info.get('currentPrice'),
+            "regularMarketChangePercent": info.get('regularMarketChangePercent') * 100 # Multiplica se vier em decimal
         }
-    except Exception as e:
-        print(f"Erro no ticker {ticker}: {e}")
+    except:
         return {"error": "not found"}
     
 @app.get("/calendar")
