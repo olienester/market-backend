@@ -5,6 +5,7 @@ from datetime import datetime
 import pytz
 import os
 from services.strategy import calculate_probability
+from services.larry_williams import calculate_lw91
 
 app = FastAPI(title="Market Data API")
 
@@ -72,6 +73,20 @@ def get_strategy(symbol: str):
         return {"error": "Não foi possível analisar o ativo"}
     return data
 
+@app.get("/strategy/91/{symbol}")
+def get_strategy_lw91(symbol: str):
+    """
+    Rota chamada pelo App React Native para verificar o Setup 9.1
+    """
+    result = calculate_lw91(symbol)
+    
+    if result is None:
+        # Retorna 404 se não tiver dados ou o ticker for inválido
+        # O seu app já tem um try/catch para lidar com isso silenciosamente
+        raise HTTPException(status_code=404, detail="Dados insuficientes ou erro no cálculo")
+        
+    return result
+    
 @app.get("/calendar")
 def get_calendar():
     try:
