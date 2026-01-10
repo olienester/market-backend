@@ -93,7 +93,6 @@ def get_strategy_lw91(symbol: str, interval: str = "1d"):
         
     return result
 
-
 @app.get("/market/dividends/{ticker}")
 def get_dividends(ticker: str):
     """
