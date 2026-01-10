@@ -29,81 +29,81 @@ def stock(
         "data": data
     }
 
-# === ROTA CALENDÁRIO CORRIGIDA ===
 @app.get("/calendar")
 def get_calendar():
-    # 1. Dados de Fallback (Sua segurança)
+    # 1. Mock de segurança (para não quebrar o App)
     mock_events = [
-        {"id": "1", "time": "09:00", "country": "BR", "impact": "high", "title": "IPCA (Mensal) - Fallback", "actual": "-", "forecast": "0.30%"},
-        {"id": "2", "time": "10:30", "country": "US", "impact": "high", "title": "Payroll (Empregos) - Fallback", "actual": "-", "forecast": "180k"},
-        {"id": "3", "time": "15:00", "country": "BR", "impact": "medium", "title": "Balança Comercial", "actual": "-", "forecast": "-"}
+        {"id": "1", "time": "09:00", "country": "BR", "impact": "high", "title": "IPCA (Mensal) - Fallback", "actual": "-", "forecast": "0.30%"}
     ]
 
+    # 2. URL EXATA que você testou e funcionou (pegando a semana toda para garantir dados)
+    url = "https://sslecal2.forexprostools.com/?columns=exc_flags,exc_currency,exc_importance,exc_actual,exc_forecast,exc_previous&features=datepicker,timezone&countries=32,5&calType=week&timeZone=12&lang=12"
+
     try:
-        # 2. Definição de Headers para "enganar" o bloqueio do Investing.com
-        # Isso finge que a requisição vem de um PC com Chrome, e não de um robô
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Referer": "https://br.investing.com/",
             "X-Requested-With": "XMLHttpRequest"
         }
 
-        # 3. URL do Widget (Mais leve e difícil de bloquear que o site principal)
-        # countries=32 (Brasil), 5 (EUA) | lang=12 (Português)
-        # url = "https://sslecal2.forexprostools.com/?columns=exc_flags,exc_currency,exc_importance,exc_actual,exc_forecast,exc_previous&features=datepicker,timezone&countries=32,5&calType=day&timeZone=12&lang=12"
-        url = "https://sslecal2.forexprostools.com/?columns=exc_flags,exc_currency,exc_importance,exc_actual,exc_forecast,exc_previous&features=datepicker,timezone&countries=32,5&calType=week&timeZone=12&lang=12"
-        
-        response = requests.get(url, headers=headers, timeout=10)
+        response = requests.get(url, headers=headers, timeout=15)
         
         if response.status_code != 200:
-            print(f"Erro no status code: {response.status_code}")
+            print(f"Erro HTTP: {response.status_code}")
             return mock_events
 
-        # 4. Pandas lê a tabela HTML diretamente
+        # 3. Lê o HTML
+        # O Pandas vai achar a tabela principal
         dfs = pd.read_html(StringIO(response.text))
-        
         if not dfs:
             return mock_events
             
-        df = dfs[0] # Pega a primeira tabela encontrada
+        df = dfs[0]
+        df = df.fillna("-") # Remove NaNs
 
-        # Limpeza básica
-        df = df.fillna("-")
-        
         events = []
         
-        # 5. Iterar e formatar (O nome das colunas pode variar, então acessamos por índice as vezes)
-        # Estrutura comum do widget: [Hora, Moeda, Imp., Evento, Atual, Projeção, Prévio]
+        # Palavras-chave para forçar impacto ALTO (já que não conseguimos ler os touros da imagem)
+        high_impact_keywords = [
+            "payroll", "ipca", "selic", "fomc", "fed", "pib", "gdp", 
+            "cpi", "ppc", "copom", "estoques de petróleo", "desemprego"
+        ]
+
+        # 4. Itera sobre as linhas
         for index, row in df.iterrows():
-            # Pula linhas de cabeçalho repetidas ou vazias
-            if str(row[0]) == "Hora" or str(row[0]) == "nan":
+            col0 = str(row[0]) # Tempo
+            col1 = str(row[1]) # Moeda
+            
+            # Pula linhas de Data (ex: "Segunda, 5 de Janeiro...") e Cabeçalhos
+            if "Jeira" in col0 or "Deira" in col0 or "Janeiro" in col0 or "Fevereiro" in col0:
+                continue
+            if col0 == "Tempo":
                 continue
 
-            time_val = str(row[0]) # Hora
-            currency = str(row[1]) # Moeda (BRL, USD)
-            
-            # Filtro de País (Baseado na moeda)
-            if "BRL" in currency:
+            # Verifica País pela moeda (Coluna 1)
+            if "BRL" in col1:
                 country = "BR"
-            elif "USD" in currency:
+            elif "USD" in col1:
                 country = "US"
             else:
-                continue # Pula outras moedas se aparecerem
+                continue # Pula outras moedas
+
+            # Dados do Evento
+            time_val = col0
+            title = str(row[3]) # Coluna 3 é o Evento
+            actual = str(row[4])
+            forecast = str(row[5])
+
+            # Lógica de Impacto (Baseada no Título, pois a coluna de imagem vem vazia)
+            impact = "medium" # Padrão
+            title_lower = title.lower()
             
-            # Tenta pegar o título. Geralmente coluna 3 (Índice 3)
-            title = str(row[3])
-
-            # Tratamento de Impacto (O pandas lê o texto, as vezes vem vazio pois é imagem)
-            # Truque: Se não conseguir ler, marcamos como medium pra não quebrar
-            imp_raw = str(row[2]).lower()
-            if "alta" in imp_raw or "high" in imp_raw:
+            # Se tiver palavra chave de alto impacto, marca como high
+            if any(key in title_lower for key in high_impact_keywords):
                 impact = "high"
-            elif "baixa" in imp_raw or "low" in imp_raw:
-                impact = "low"
-            else:
-                impact = "medium" # Default seguro
-
-            # Remove eventos sem título relevante
-            if "Feriado" in title or title == "-":
+            
+            # Se for feriado, ignora ou marca low
+            if "Feriado" in title:
                 continue
 
             events.append({
@@ -112,16 +112,16 @@ def get_calendar():
                 "country": country,
                 "impact": impact,
                 "title": title,
-                "actual": str(row[4]),
-                "forecast": str(row[5])
+                "actual": actual,
+                "forecast": forecast
             })
 
         if not events:
+            # Se filtrou tudo e sobrou nada, retorna mock
             return mock_events
 
         return events
 
     except Exception as e:
-        print(f"Erro ao raspar calendário: {e}")
-        # Retorna o mock em caso de erro (ex: Render bloqueado)
+        print(f"Erro ao processar: {e}")
         return mock_events
