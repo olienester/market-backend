@@ -74,15 +74,19 @@ def get_strategy(symbol: str):
     return data
 
 @app.get("/strategy/91/{symbol}")
-def get_strategy_lw91(symbol: str):
+def get_strategy_lw91(symbol: str, interval: str = "1d"):
     """
-    Rota chamada pelo App React Native para verificar o Setup 9.1
+    Rota para verificar o Setup 9.1.
+    
+    Exemplos de chamada:
+    - Diário (Padrão): /strategy/91/PETR4
+    - 60 Minutos:      /strategy/91/PETR4?interval=60m
     """
-    result = calculate_lw91(symbol)
+    
+    # Passamos o 'symbol' E o 'interval' para a função de cálculo
+    result = calculate_lw91(symbol, interval)
     
     if result is None:
-        # Retorna 404 se não tiver dados ou o ticker for inválido
-        # O seu app já tem um try/catch para lidar com isso silenciosamente
         raise HTTPException(status_code=404, detail="Dados insuficientes ou erro no cálculo")
         
     return result
