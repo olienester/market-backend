@@ -66,9 +66,6 @@ def stock(
 
 @app.get("/calendar")
 def get_calendar():
-    # ===============================
-    # Fallback de segurança
-    # ===============================
     mock_events = [
         {
             "id": "1",
@@ -90,41 +87,27 @@ def get_calendar():
         )
 
         if response.status_code != 200:
-            print(f"Erro HTTP Calendar: {response.status_code}")
             return mock_events
 
         data = response.json()
         events = []
 
         for item in data:
-            country = item.get("country")
-
-            # Segurança extra
-            if country not in ["BR", "US"]:
+            if item.get("country") not in ["BR", "US"]:
                 continue
 
             events.append({
                 "id": str(item.get("id")),
                 "time": item.get("time"),
-                "country": country,
+                "country": item.get("country"),
                 "impact": item.get("importance", "medium").lower(),
                 "title": traduzir(item.get("title")),
                 "actual": item.get("actual", "-"),
-                "forecast": item.get("forecast", "-"),
-                "previous": item.get("previous", "-"),
-                "date": item.get("date")
+                "forecast": item.get("forecast", "-")
             })
 
-        if not events:
-            return mock_events
-
-        return {
-            "source": "rapidapi-economic-calendar",
-            "language": "pt-BR",
-            "total": len(events),
-            "events": events
-        }
+        return events if events else mock_events
 
     except Exception as e:
-        print(f"Erro Calendar API: {e}")
+        print(e)
         return mock_events
