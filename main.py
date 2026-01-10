@@ -137,7 +137,20 @@ def get_dividends(ticker: str):
     except Exception as e:
         print(f"Erro ao buscar dividendos de {symbol}: {e}")
         return []
-        
+
+@app.get("/market/quote/{ticker}")
+def get_quote(ticker: str):
+    try:
+        t = yf.Ticker(ticker + ".SA")
+        info = t.info
+        # O Yahoo Finance geralmente retorna 'regularMarketChangePercent'
+        return {
+            "symbol": ticker,
+            "price": info.get('currentPrice'),
+            "regularMarketChangePercent": info.get('regularMarketChangePercent') * 100 # Multiplica se vier em decimal
+        }
+    except:
+        return {"error": "not found"}
     
 @app.get("/calendar")
 def get_calendar():
