@@ -49,8 +49,9 @@ def get_calendar():
 
         # 3. URL do Widget (Mais leve e difícil de bloquear que o site principal)
         # countries=32 (Brasil), 5 (EUA) | lang=12 (Português)
-        url = "https://sslecal2.forexprostools.com/?columns=exc_flags,exc_currency,exc_importance,exc_actual,exc_forecast,exc_previous&features=datepicker,timezone&countries=32,5&calType=day&timeZone=12&lang=12"
-
+        # url = "https://sslecal2.forexprostools.com/?columns=exc_flags,exc_currency,exc_importance,exc_actual,exc_forecast,exc_previous&features=datepicker,timezone&countries=32,5&calType=day&timeZone=12&lang=12"
+        url = "https://sslecal2.forexprostools.com/?columns=exc_flags,exc_currency,exc_importance,exc_actual,exc_forecast,exc_previous&features=datepicker,timezone&countries=32,5&calType=week&timeZone=12&lang=12"
+        
         response = requests.get(url, headers=headers, timeout=10)
         
         if response.status_code != 200:
