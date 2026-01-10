@@ -4,6 +4,7 @@ import requests
 from datetime import datetime
 import pytz
 import os
+from services.strategy import calculate_probability
 
 app = FastAPI(title="Market Data API")
 
@@ -60,6 +61,16 @@ def stock(
         "data": data
     }
 
+@app.get("/strategy/{symbol}")
+def get_strategy(symbol: str):
+    """
+    Ex: /strategy/PETR4
+    Retorna a probabilidade baseada na abertura de hoje.
+    """
+    data = calculate_probability(symbol)
+    if not data:
+        return {"error": "Não foi possível analisar o ativo"}
+    return data
 
 @app.get("/calendar")
 def get_calendar():
