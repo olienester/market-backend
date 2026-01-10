@@ -1,13 +1,16 @@
 from fastapi import FastAPI, HTTPException
 from services.market_data import get_stock_data
 import requests
+from datetime import datetime
+import pytz
+import os
 
 app = FastAPI(title="Market Data API")
 
 # ===============================
 # CONFIG RapidAPI
 # ===============================
-RAPIDAPI_KEY = "6953dbd60amshff67959b8365976p187260jsn89454cfdec94"
+RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY")
 
 CALENDAR_URL = "https://economic-events-calendar.p.rapidapi.com/economic-events/tradingview"
 
@@ -16,10 +19,20 @@ CALENDAR_HEADERS = {
     "x-rapidapi-host": "economic-events-calendar.p.rapidapi.com"
 }
 
-CALENDAR_PARAMS = {
-    "countries": "BR,US",
-    "importance": "HIGH"
-}
+# ===============================
+# Mock fallback
+# ===============================
+mock_events = [
+    {
+        "id": "1",
+        "time": "09:00",
+        "country": "BR",
+        "impact": "high",
+        "title": "IPCA (Mensal)",
+        "actual": "-",
+        "forecast": "0,30%"
+    }
+]
 
 # ===============================
 # Endpoints
@@ -50,54 +63,59 @@ def stock(
 
 @app.get("/calendar")
 def get_calendar():
-    # ===============================
-    # Fallback de segurança
-    # ===============================
-    mock_events = [
-        {
-            "id": "1",
-            "time": "09:00",
-            "country": "BR",
-            "impact": "high",
-            "title": "IPCA (Mensal)",
-            "actual": "-",
-            "forecast": "0,30%"
-        }
-    ]
-
     try:
         response = requests.get(
             CALENDAR_URL,
             headers=CALENDAR_HEADERS,
-            params=CALENDAR_PARAMS,
             timeout=15
         )
 
         if response.status_code != 200:
             return mock_events
 
-        data = response.json()
+        payload = response.json()
+        data = payload.get("result", [])
+
         events = []
 
         for item in data:
             country = item.get("country")
-
-            # Filtra apenas BR e US
-            if country not in ["BR", "US"]:
+            if country not in ("BR", "US"):
                 continue
 
+            importance = item.get("importance", 0)
+            if importance >= 1:
+                impact = "high"
+            elif importance == 0:
+                impact = "medium"
+            else:
+                impact = "low"
+
+            if impact == "low":
+                continue
+
+            try:
+                dt = datetime.fromisoformat(
+                    item["date"].replace("Z", "+00:00")
+                ).astimezone(
+                    pytz.timezone("America/Sao_Paulo")
+                )
+                time = dt.strftime("%H:%M")
+            except:
+                time = "--:--"
+
             events.append({
-                "id": str(item.get("id")),
-                "time": item.get("time"),
+                "id": item.get("id"),
+                "time": time,
                 "country": country,
-                "impact": item.get("importance", "medium").lower(),
-                "title": item.get("title"),  # SEM tradução (estável)
-                "actual": item.get("actual", "-"),
-                "forecast": item.get("forecast", "-")
+                "impact": impact,
+                "title": item.get("title"),
+                "actual": item.get("actual") or "-",
+                "forecast": item.get("forecast") or "-"
             })
 
-        return events if events else mock_events
+        return events or mock_events
 
     except Exception as e:
-        print("Erro no calendário:", e)
+        print("Erro calendário:", e)
         return mock_events
