@@ -1,7 +1,9 @@
 from fastapi import FastAPI, HTTPException
 from services.market_data import get_stock_data
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
+import yfinance as yf
+import pandas as pd
 import pytz
 import os
 from services.strategy import calculate_probability
@@ -90,6 +92,53 @@ def get_strategy_lw91(symbol: str, interval: str = "1d"):
         raise HTTPException(status_code=404, detail="Dados insuficientes ou erro no cálculo")
         
     return result
+
+
+@app.get("/market/dividends/{ticker}")
+def get_dividends(ticker: str):
+    """
+    Retorna os proventos (Dividendos/JCP) dos últimos 12 meses e futuros.
+    """
+    # Garante o sufixo .SA
+    symbol = ticker.upper() if ticker.upper().endswith(".SA") else f"{ticker.upper()}.SA"
+    
+    try:
+        asset = yf.Ticker(symbol)
+        
+        # Pega histórico de dividendos
+        divs = asset.dividends
+        
+        if divs.empty:
+            return []
+
+        # Filtra: Queremos apenas de 1 ano atrás até o futuro
+        start_date = pd.Timestamp.now(tz=divs.index.tz) - pd.DateOffset(months=12)
+        recent_divs = divs[divs.index >= start_date]
+        
+        results = []
+        for date, value in recent_divs.items():
+            # Formata a data para string "DD/MM/YYYY"
+            date_str = date.strftime("%d/%m/%Y")
+            
+            # Tenta inferir o tipo (O yfinance básico mistura tudo como Dividends, 
+            # mas para FIIs geralmente é Rendimento)
+            div_type = "Provento"
+            
+            results.append({
+                "dataPagamento": date_str, # O yfinance retorna a data Ex ou Pagamento dependendo do ativo, geralmente usamos como referência
+                "valor": float(value),
+                "tipo": div_type
+            })
+            
+        # Ordena do mais recente para o mais antigo
+        results.reverse()
+        
+        return results
+
+    except Exception as e:
+        print(f"Erro ao buscar dividendos de {symbol}: {e}")
+        return []
+        
     
 @app.get("/calendar")
 def get_calendar():
