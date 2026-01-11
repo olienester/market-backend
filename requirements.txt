@@ -4,3 +4,5 @@ yfinance
 cachetools
 pandas
 requests
+lxml
+numpy
