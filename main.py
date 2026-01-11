@@ -9,12 +9,12 @@ import os
 import io
 import time
 import numpy as np
+import cloudscraper
 
 # Importações dos seus serviços (garanta que esses arquivos existem)
 from services.market_data import get_stock_data
 from services.strategy import calculate_probability
 from services.larry_williams import calculate_lw91
-from curl_cffi import requests as cffi_requests
 
 app = FastAPI(title="Market Data API")
 
@@ -50,7 +50,7 @@ CACHE_TIMEOUT = 3600  # 1 hora de cache
 _cache_data = {"timestamp": 0, "data": None}
 
 def fetch_fundamentus_data():
-    """Baixa e trata os dados do Fundamentus usando impersonate de browser"""
+    """Baixa e trata os dados do Fundamentus usando Cloudscraper para evitar 403"""
     global _cache_data
     
     # Verifica cache
@@ -60,25 +60,16 @@ def fetch_fundamentus_data():
     url = 'https://www.fundamentus.com.br/fii_resultado.php'
     
     try:
-        # AQUI ESTÁ A CORREÇÃO:
-        # Usamos curl_cffi para fingir ser um Chrome 120 real.
-        # Isso engana o firewall do site (Cloudflare/WAF).
-        response = cffi_requests.get(
-            url, 
-            impersonate="chrome120", 
-            headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-                "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
-                "Referer": "https://www.fundamentus.com.br/"
-            },
-            timeout=15
-        )
+        # CRIA UM SCRAPER QUE SIMULA UM NAVEGADOR REAL
+        scraper = cloudscraper.create_scraper() 
+        
+        # Faz a requisição (o scraper já injeta os headers e cookies corretos)
+        response = scraper.get(url)
         
         if response.status_code != 200:
             raise Exception(f"Status Code: {response.status_code}")
         
-        # O resto segue igual... lê o HTML retornado
+        # O resto do tratamento segue igual
         df = pd.read_html(io.BytesIO(response.content), decimal=',', thousands='.')[0]
         
         # Renomear colunas
@@ -110,6 +101,7 @@ def fetch_fundamentus_data():
         
     except Exception as e:
         print(f"Erro no scraping: {e}")
+        # Se falhar e tiver cache, usa o cache
         if _cache_data["data"] is not None:
             return _cache_data["data"]
         raise e
