@@ -14,6 +14,7 @@ import numpy as np
 from services.market_data import get_stock_data
 from services.strategy import calculate_probability
 from services.larry_williams import calculate_lw91
+from curl_cffi import requests as cffi_requests
 
 app = FastAPI(title="Market Data API")
 
@@ -49,23 +50,38 @@ CACHE_TIMEOUT = 3600  # 1 hora de cache
 _cache_data = {"timestamp": 0, "data": None}
 
 def fetch_fundamentus_data():
-    """Baixa e trata os dados do Fundamentus"""
+    """Baixa e trata os dados do Fundamentus usando impersonate de browser"""
     global _cache_data
     
-    # Verifica cache (se tem dados e se tem menos de 1 hora)
+    # Verifica cache
     if _cache_data["data"] is not None and (time.time() - _cache_data["timestamp"] < CACHE_TIMEOUT):
         return _cache_data["data"]
 
     url = 'https://www.fundamentus.com.br/fii_resultado.php'
     
     try:
-        response = requests.get(url, headers=HEADERS)
-        response.raise_for_status()
+        # AQUI ESTÁ A CORREÇÃO:
+        # Usamos curl_cffi para fingir ser um Chrome 120 real.
+        # Isso engana o firewall do site (Cloudflare/WAF).
+        response = cffi_requests.get(
+            url, 
+            impersonate="chrome120", 
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+                "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+                "Referer": "https://www.fundamentus.com.br/"
+            },
+            timeout=15
+        )
         
-        # Lê a tabela HTML
+        if response.status_code != 200:
+            raise Exception(f"Status Code: {response.status_code}")
+        
+        # O resto segue igual... lê o HTML retornado
         df = pd.read_html(io.BytesIO(response.content), decimal=',', thousands='.')[0]
         
-        # Renomear colunas para facilitar manipulação
+        # Renomear colunas
         df.rename(columns={
             'Papel': 'ticker',
             'Segmento': 'setor',
@@ -77,27 +93,23 @@ def fetch_fundamentus_data():
             'Vacância Média': 'vacancia'
         }, inplace=True)
 
-        # Limpeza: Converter strings de porcentagem para float
+        # Limpeza
         for col in ['dy', 'cap_rate', 'vacancia']:
             if col in df.columns:
                 df[col] = df[col].astype(str).str.replace('%', '').str.replace(',', '.').replace('nan', '0')
                 df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
 
-        # Limpeza: P/VP e Liquidez
         df['pvp'] = pd.to_numeric(df['pvp'], errors='coerce').fillna(0)
         df['liquidez'] = pd.to_numeric(df['liquidez'], errors='coerce').fillna(0)
         
-        # Filtros básicos de segurança (ignorar lixo com liquidez zero)
         df = df[df['liquidez'] > 0]
         
-        # Atualiza o cache
         _cache_data = {"timestamp": time.time(), "data": df}
         
         return df
         
     except Exception as e:
         print(f"Erro no scraping: {e}")
-        # Se der erro e tiver cache antigo, retorna ele
         if _cache_data["data"] is not None:
             return _cache_data["data"]
         raise e
