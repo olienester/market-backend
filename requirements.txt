@@ -6,3 +6,5 @@ pandas
 requests
 lxml
 numpy
+pytz
+curl_cffi==0.5.10
