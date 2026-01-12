@@ -14,6 +14,7 @@ from services.larry_williams import calculate_lw91
 # Importa o novo serviço de ranking
 from services.ranking_service import calculate_ranking 
 from services.ranking_acoes_service import get_relatorio_geral_acoes
+from services.ranking_usa_service import get_relatorio_geral_usa
 
 app = FastAPI(title="Market Data API")
 
@@ -181,3 +182,29 @@ def get_ranking_geral():
         return get_relatorio_geral_acoes()
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# =========================================================
+# ROTA: RANKING USA (TODAS AS STOCKS / SCANNER)
+# =========================================================
+@app.get("/api/ranking/usa/geral")
+def get_ranking_usa_endpoint():
+    """
+    Retorna o Ranking de Ações Americanas (Scanner Completo).
+    Fonte: Lista NASDAQ + Yahoo Finance.
+    Estratégias: Greenblatt, Graham, Bazin, Barsi (Adaptados).
+    
+    Nota: A primeira execução pode levar alguns minutos para 
+    baixar e processar os dados. As próximas serão instantâneas (Cache).
+    """
+    try:
+        print("Recebida solicitação de Ranking USA...")
+        resultado = get_relatorio_geral_usa()
+        
+        if not resultado:
+            return {"message": "Nenhum ativo encontrado ou erro no scanner.", "data": []}
+            
+        return resultado
+        
+    except Exception as e:
+        print(f"Erro Crítico no Endpoint USA: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Erro interno ao gerar ranking USA: {str(e)}")
