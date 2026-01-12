@@ -113,84 +113,65 @@ def fetch_fundamentus_acoes():
         if _cache_acoes["data"] is not None: return _cache_acoes["data"]
         return pd.DataFrame()
 
-def calculate_acoes_ranking(sort_by: str = 'joel'):
+def get_relatorio_geral_acoes():
     """
-    Calcula Rankings com base no setor mapeado.
+    Retorna TODAS as ações com TODOS os rankings calculados.
+    O Frontend decide como ordenar.
     """
     df = fetch_fundamentus_acoes().copy()
 
     if df.empty: return []
 
-    # 1. FILTROS (VBA)
-    df = df[df['liq_media_diaria'] >= 200000] # Liquidez
-    df = df[df['p_l'] > 0] # Lucro positivo
-    df = df[(df['dy'] > 0) & (df['dy'] < 50)] # Tem dividendos
+    # 1. FILTROS BÁSICOS (Liquidez, Lucro, DY)
+    df = df[df['liq_media_diaria'] >= 200000]
+    df = df[df['p_l'] > 0]
     
-    # 2. JOEL GREENBLATT
+    # ==============================================================================
+    # CÁLCULO DE TODOS OS RANKINGS (Mesma lógica anterior, tudo junto)
+    # ==============================================================================
+    
+    # --- JOEL ---
     df['earning_yield'] = df['ev_ebit'].apply(lambda x: 1/x if x > 0 else 0)
-    df['rank_ey'] = df['earning_yield'].rank(ascending=False)
-    df['rank_roic'] = df['roic'].rank(ascending=False)
-    df['score_joel'] = df['rank_ey'] + df['rank_roic']
-    df['ranking_joel'] = df['score_joel'].rank(ascending=True) 
+    df['score_joel'] = df['earning_yield'].rank(ascending=False) + df['roic'].rank(ascending=False)
+    df['RANKING_JOEL'] = df['score_joel'].rank(ascending=True)
 
-    # 3. BENJAMIN GRAHAM
-    def calc_graham_vi(row):
+    # --- GRAHAM ---
+    def calc_graham(row):
         lpa = row['lpa']
         cagr = row['cagr_lucros_5a']
-        if lpa > 0:
-            return (lpa * (8.5 + 2 * cagr) * 4.4) / 22.5
+        if lpa > 0: return (lpa * (8.5 + 2 * cagr) * 4.4) / 22.5
         return 0
+    df['valor_intrinseco'] = df.apply(calc_graham, axis=1)
+    df['margem_seg'] = df.apply(lambda x: (x['valor_intrinseco'] - x['preco'])/x['valor_intrinseco'] if x['valor_intrinseco'] > 0 else -10, axis=1)
+    df['RANKING_GRAHAM'] = (df['margem_seg'].rank(ascending=False) + df['p_vp'].rank(ascending=True)).rank(ascending=True)
 
-    df['valor_intrinseco'] = df.apply(calc_graham_vi, axis=1)
-    df['margem_seguranca'] = df.apply(lambda x: (x['valor_intrinseco'] - x['preco']) / x['valor_intrinseco'] if x['valor_intrinseco'] > 0 else -10, axis=1)
-    
-    df['ranking_graham'] = (df['margem_seguranca'].rank(ascending=False) + df['p_vp'].rank(ascending=True)).rank(ascending=True)
-
-    # 4. DÉCIO BAZIN
+    # --- BAZIN ---
     df['preco_teto_bazin'] = (df['preco'] * df['dy']) / 6
     df['upside_bazin'] = (df['preco_teto_bazin'] / df['preco']) - 1
-    df['ranking_bazin'] = (df['upside_bazin'].rank(ascending=False) + df['dy'].rank(ascending=False)).rank(ascending=True)
+    df['RANKING_BAZIN'] = (df['upside_bazin'].rank(ascending=False) + df['dy'].rank(ascending=False)).rank(ascending=True)
 
-    # 5. LUIZ BARSI (Agora usando a coluna 'setor' mapeada)
-    r_dy = df['dy'].rank(ascending=False) * 2
-    r_pvp = df['p_vp'].rank(ascending=True)
-    r_roe = df['roe'].rank(ascending=False)
-    r_margem = df['margem_liquida'].rank(ascending=False)
-    r_divida = df['div_liq_patrimonio'].rank(ascending=True)
+    # --- BARSI ---
+    df['score_barsi'] = (df['dy'].rank(ascending=False)*2) + df['p_vp'].rank(ascending=True) + df['roe'].rank(ascending=False) + df['div_liq_patrimonio'].rank(ascending=True)
     
-    df['score_barsi_raw'] = r_dy + r_pvp + r_roe + r_margem + r_divida
-    
-    # Função para verificar se o setor é BEST
-    def ajustar_setor(row):
-        score = row['score_barsi_raw']
-        setor_atual = str(row['setor'])
+    def ajuste_setor(row):
+        return row['score_barsi'] * 0.8 if row['setor'] in SETORES_BARSI_BEST else row['score_barsi']
         
-        # Verifica se o setor da ação está na lista BEST
-        if setor_atual in SETORES_BARSI_BEST:
-            return score * 0.8 # Bônus de 20%
-        return score
+    df['RANKING_BARSI'] = df.apply(ajuste_setor, axis=1).rank(ascending=True)
 
-    df['score_barsi_final'] = df.apply(ajustar_setor, axis=1)
-    df['ranking_barsi'] = df['score_barsi_final'].rank(ascending=True)
-
-    # Ordenação Final
-    sort_column = 'ranking_joel'
-    if sort_by == 'graham': sort_column = 'ranking_graham'
-    elif sort_by == 'bazin': sort_column = 'ranking_bazin'
-    elif sort_by == 'barsi': sort_column = 'ranking_barsi'
-
-    df = df.sort_values(sort_column, ascending=True)
+    # ==============================================================================
+    # PREPARAÇÃO FINAL
+    # ==============================================================================
     
-    cols_float = ['preco', 'dy', 'p_l', 'valor_intrinseco', 'preco_teto_bazin']
-    for col in cols_float:
-        if col in df.columns:
-            df[col] = df[col].round(2)
+    # Arredondamentos visuais
+    for col in ['preco', 'dy', 'p_l', 'p_vp', 'valor_intrinseco', 'preco_teto_bazin']:
+        if col in df.columns: df[col] = df[col].round(2)
 
-    # Adicionei 'setor' na exportação para o App mostrar
-    cols_export = [
+    # Colunas essenciais para o App
+    cols = [
         'ativo', 'setor', 'preco', 'dy', 'p_l', 'p_vp', 
-        'ranking_joel', 'ranking_graham', 'ranking_bazin', 'ranking_barsi',
+        'RANKING_JOEL', 'RANKING_GRAHAM', 'RANKING_BAZIN', 'RANKING_BARSI',
         'valor_intrinseco', 'preco_teto_bazin'
     ]
     
-    return df[cols_export].head(100).to_dict(orient='records')
+    # Retorna TUDO (sem limite de 30) para o App filtrar
+    return df[cols].to_dict(orient='records')
