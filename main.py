@@ -171,15 +171,13 @@ def get_ranking_endpoint(sort_by: str = Query("shank", enum=["shank", "smart"]))
         print(f"Erro no endpoint de ranking: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/ranking/acoes")
-def get_ranking_acoes_endpoint(strategy: str = Query("joel", enum=["joel", "graham", "bazin", "barsi"])):
-    """
-    Retorna o ranking de ações calculado em tempo real (com cache de 1h).
-    Estratégias: Joel Greenblatt, Benjamin Graham, Décio Bazin, Luiz Barsi.
-    """
+
+# =========================================================
+# RANKING AÇOES
+# =========================================================
+@app.get("/api/ranking/acoes/geral")
+def get_ranking_geral():
     try:
-        result = calculate_acoes_ranking(strategy)
-        return result
+        return get_relatorio_geral_acoes()
     except Exception as e:
-        print(f"Erro no endpoint ranking ações: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
