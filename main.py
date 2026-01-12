@@ -11,8 +11,7 @@ import os
 from services.market_data import get_stock_data
 from services.strategy import calculate_probability
 from services.larry_williams import calculate_lw91
-# Importa o novo serviço de ranking
-from services.ranking_service import calculate_ranking 
+from services.ranking_service import calculate_ranking
 from services.ranking_acoes_service import get_relatorio_geral_acoes
 from services.ranking_usa_service import get_relatorio_geral_usa
 
@@ -37,13 +36,18 @@ _calendar_cache = {
     "expires_at": None
 }
 
-CACHE_HOURS = 8
+CACHE_HOURS = 24  # 🔥 24h = 1 chamada/dia = ~30/mês
 
 # ===============================
 # CONFIG RapidAPI (Calendário)
 # ===============================
 RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY")
-CALENDAR_URL = "https://economic-events-calendar.p.rapidapi.com/economic-events/tradingview"
+
+CALENDAR_URL = (
+    "https://economic-events-calendar.p.rapidapi.com/"
+    "economic-events/tradingview?countries=US,BR"
+)
+
 CALENDAR_HEADERS = {
     "x-rapidapi-key": RAPIDAPI_KEY,
     "x-rapidapi-host": "economic-events-calendar.p.rapidapi.com"
@@ -54,7 +58,8 @@ CALENDAR_HEADERS = {
 # ===============================
 mock_events = [
     {
-        "id": "1",
+        "id": "mock-1",
+        "date": datetime.now().strftime("%Y-%m-%d"),
         "time": "09:00",
         "country": "BR",
         "impact": "high",
@@ -65,7 +70,7 @@ mock_events = [
 ]
 
 # ===============================
-# ENDPOINTS
+# ENDPOINTS BÁSICOS
 # ===============================
 @app.get("/")
 def root():
@@ -94,7 +99,7 @@ def get_strategy(symbol: str):
 def get_strategy_lw91(symbol: str, interval: str = "1d"):
     result = calculate_lw91(symbol, interval)
     if result is None:
-        raise HTTPException(status_code=404, detail="Dados insuficientes ou erro no cálculo")
+        raise HTTPException(status_code=404, detail="Erro no cálculo")
     return result
 
 @app.get("/market/dividends/{ticker}")
@@ -103,23 +108,23 @@ def get_dividends(ticker: str):
     try:
         asset = yf.Ticker(symbol)
         divs = asset.dividends
-        if divs.empty: return []
+        if divs.empty:
+            return []
 
         start_date = pd.Timestamp.now(tz=divs.index.tz) - pd.DateOffset(months=12)
         recent_divs = divs[divs.index >= start_date]
-        
+
         results = []
         for date, value in recent_divs.items():
-            date_str = date.strftime("%d/%m/%Y")
             results.append({
-                "dataPagamento": date_str,
+                "dataPagamento": date.strftime("%d/%m/%Y"),
                 "valor": float(value),
                 "tipo": "Provento"
             })
-        results.reverse()
-        return results
+
+        return list(reversed(results))
     except Exception as e:
-        print(f"Erro ao buscar dividendos de {symbol}: {e}")
+        print(f"Erro dividendos {symbol}:", e)
         return []
 
 @app.get("/market/quote/{ticker}")
@@ -129,14 +134,14 @@ def get_quote(ticker: str):
         info = t.info
         return {
             "symbol": ticker,
-            "price": info.get('currentPrice'),
-            "regularMarketChangePercent": info.get('regularMarketChangePercent') * 100
+            "price": info.get("currentPrice"),
+            "regularMarketChangePercent": info.get("regularMarketChangePercent", 0) * 100
         }
-    except:
+    except Exception:
         return {"error": "not found"}
 
 # =========================================================
-# CALENDÁRIO DE NOTICIAS
+# CALENDÁRIO ECONÔMICO (CACHE 24H)
 # =========================================================
 @app.get("/calendar")
 def get_calendar():
@@ -144,18 +149,16 @@ def get_calendar():
 
     now = datetime.utcnow()
 
-    # ===============================
-    # RETORNA CACHE SE VÁLIDO
-    # ===============================
+    # ✅ CACHE VÁLIDO
     if (
-        _calendar_cache["data"] is not None
-        and _calendar_cache["expires_at"] is not None
+        _calendar_cache["data"]
+        and _calendar_cache["expires_at"]
         and now < _calendar_cache["expires_at"]
     ):
-        print("📦 CALENDAR: retornando cache")
+        print("📦 Calendar: retornando cache")
         return _calendar_cache["data"]
 
-    print("🌐 CALENDAR: buscando da RapidAPI")
+    print("🌐 Calendar: buscando da RapidAPI")
 
     try:
         response = requests.get(
@@ -165,16 +168,15 @@ def get_calendar():
         )
 
         if response.status_code != 200:
-            print("❌ STATUS != 200:", response.text)
+            print("❌ RapidAPI status:", response.status_code)
             return _calendar_cache["data"] or mock_events
 
         payload = response.json()
 
-        # 🔥 SUPORTA TODOS OS FORMATOS
-        if isinstance(payload, list):
-            data = payload
-        elif isinstance(payload, dict):
+        if isinstance(payload, dict):
             data = payload.get("result") or payload.get("data") or []
+        elif isinstance(payload, list):
+            data = payload
         else:
             data = []
 
@@ -183,10 +185,9 @@ def get_calendar():
 
         for item in data:
             country = item.get("country")
-            if country not in ("BR", "US"):
+            if country not in ("US", "BR"):
                 continue
 
-            # 🧠 NORMALIZA IMPACTO
             raw_importance = item.get("importance") or item.get("impact")
             impact = None
 
@@ -227,68 +228,34 @@ def get_calendar():
                 "forecast": item.get("forecast") or "-"
             })
 
-        # ===============================
-        # SALVA NO CACHE (8 HORAS)
-        # ===============================
+        # 💾 SALVA CACHE (24H)
         _calendar_cache["data"] = events or mock_events
         _calendar_cache["expires_at"] = now + timedelta(hours=CACHE_HOURS)
 
-        print(f"✅ CALENDAR cache salvo até {_calendar_cache['expires_at']}")
-
+        print(f"✅ Calendar cache salvo até {_calendar_cache['expires_at']}")
         return _calendar_cache["data"]
 
     except Exception as e:
         print("🔥 ERRO CALENDAR:", e)
         return _calendar_cache["data"] or mock_events
 
-
-
 # =========================================================
-# RANKING FIIs (Agora muito mais limpo!)
+# RANKINGS
 # =========================================================
 @app.get("/api/ranking")
 def get_ranking_endpoint(sort_by: str = Query("shank", enum=["shank", "smart"])):
     try:
-        # Chama a função que está no services/ranking_service.py
-        result = calculate_ranking(sort_by)
-        return result
+        return calculate_ranking(sort_by)
     except Exception as e:
-        print(f"Erro no endpoint de ranking: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
-# =========================================================
-# RANKING AÇOES
-# =========================================================
 @app.get("/api/ranking/acoes/geral")
 def get_ranking_geral():
-    try:
-        return get_relatorio_geral_acoes()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    return get_relatorio_geral_acoes()
 
-# =========================================================
-# ROTA: RANKING USA (TODAS AS STOCKS / SCANNER)
-# =========================================================
 @app.get("/api/ranking/usa/geral")
 def get_ranking_usa_endpoint():
-    """
-    Retorna o Ranking de Ações Americanas (Scanner Completo).
-    Fonte: Lista NASDAQ + Yahoo Finance.
-    Estratégias: Greenblatt, Graham, Bazin, Barsi (Adaptados).
-    
-    Nota: A primeira execução pode levar alguns minutos para 
-    baixar e processar os dados. As próximas serão instantâneas (Cache).
-    """
     try:
-        print("Recebida solicitação de Ranking USA...")
-        resultado = get_relatorio_geral_usa()
-        
-        if not resultado:
-            return {"message": "Nenhum ativo encontrado ou erro no scanner.", "data": []}
-            
-        return resultado
-        
+        return get_relatorio_geral_usa()
     except Exception as e:
-        print(f"Erro Crítico no Endpoint USA: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Erro interno ao gerar ranking USA: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
