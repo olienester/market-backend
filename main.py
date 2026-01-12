@@ -124,40 +124,70 @@ def get_quote(ticker: str):
         }
     except:
         return {"error": "not found"}
-    
+
+# =========================================================
+# CALENDÁRIO DE NOTICIAS
+# =========================================================
 @app.get("/calendar")
 def get_calendar():
     try:
-        response = requests.get(CALENDAR_URL, headers=CALENDAR_HEADERS, timeout=15)
-        if response.status_code != 200: return mock_events
+        response = requests.get(
+            CALENDAR_URL,
+            headers=CALENDAR_HEADERS,
+            timeout=15
+        )
+
+        if response.status_code != 200:
+            return []
+
         payload = response.json()
         data = payload.get("result", [])
+
         events = []
+        tz = pytz.timezone("America/Sao_Paulo")
+
         for item in data:
             country = item.get("country")
-            if country not in ("BR", "US"): continue
+            if country not in ("BR", "US"):
+                continue
+
             importance = item.get("importance", 0)
-            if importance >= 1: impact = "high"
-            elif importance == 0: impact = "medium"
-            else: impact = "low"
-            if impact == "low": continue
+
+            if importance >= 3:
+                impact = "high"
+            elif importance == 2:
+                impact = "medium"
+            else:
+                continue  # remove impacto baixo
+
             try:
-                dt = datetime.fromisoformat(item["date"].replace("Z", "+00:00")).astimezone(pytz.timezone("America/Sao_Paulo"))
+                dt = datetime.fromisoformat(
+                    item["date"].replace("Z", "+00:00")
+                ).astimezone(tz)
+
+                date_str = dt.strftime("%Y-%m-%d")
                 time_str = dt.strftime("%H:%M")
-            except: time_str = "--:--"
+            except Exception:
+                date_str = None
+                time_str = "--:--"
+
             events.append({
                 "id": item.get("id"),
+                "date": date_str,     # ✅ DATA DISPONÍVEL
                 "time": time_str,
                 "country": country,
                 "impact": impact,
                 "title": item.get("title"),
-                "actual": item.get("actual") or "-",
-                "forecast": item.get("forecast") or "-"
+                "actual": item.get("actual"),
+                "forecast": item.get("forecast"),
             })
-        return events or mock_events
+
+        return events
+
     except Exception as e:
         print("Erro calendário:", e)
-        return mock_events
+        return []
+
 
 # =========================================================
 # RANKING FIIs (Agora muito mais limpo!)
