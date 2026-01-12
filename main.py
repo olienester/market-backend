@@ -239,7 +239,7 @@ def get_calendar():
         return mock_events
 
 
-@@app.get("/api/ranking")
+@app.get("/api/ranking")
 def get_ranking(sort_by: str = Query("shank", enum=["shank", "smart"])):
     try:
         # 1. Baixa os dados brutos
