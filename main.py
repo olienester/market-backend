@@ -13,6 +13,7 @@ from services.strategy import calculate_probability
 from services.larry_williams import calculate_lw91
 # Importa o novo serviço de ranking
 from services.ranking_service import calculate_ranking 
+from services.ranking_acoes_service import calculate_acoes_ranking # Importe a função nova
 
 app = FastAPI(title="Market Data API")
 
@@ -168,4 +169,17 @@ def get_ranking_endpoint(sort_by: str = Query("shank", enum=["shank", "smart"]))
         return result
     except Exception as e:
         print(f"Erro no endpoint de ranking: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/ranking/acoes")
+def get_ranking_acoes_endpoint(strategy: str = Query("joel", enum=["joel", "graham", "bazin", "barsi"])):
+    """
+    Retorna o ranking de ações calculado em tempo real (com cache de 1h).
+    Estratégias: Joel Greenblatt, Benjamin Graham, Décio Bazin, Luiz Barsi.
+    """
+    try:
+        result = calculate_acoes_ranking(strategy)
+        return result
+    except Exception as e:
+        print(f"Erro no endpoint ranking ações: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
