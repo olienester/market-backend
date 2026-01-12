@@ -30,6 +30,16 @@ app.add_middleware(
 )
 
 # ===============================
+# CACHE EM MEMÓRIA (CALENDÁRIO)
+# ===============================
+_calendar_cache = {
+    "data": None,
+    "expires_at": None
+}
+
+CACHE_HOURS = 8
+
+# ===============================
 # CONFIG RapidAPI (Calendário)
 # ===============================
 RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY")
@@ -130,6 +140,23 @@ def get_quote(ticker: str):
 # =========================================================
 @app.get("/calendar")
 def get_calendar():
+    global _calendar_cache
+
+    now = datetime.utcnow()
+
+    # ===============================
+    # RETORNA CACHE SE VÁLIDO
+    # ===============================
+    if (
+        _calendar_cache["data"] is not None
+        and _calendar_cache["expires_at"] is not None
+        and now < _calendar_cache["expires_at"]
+    ):
+        print("📦 CALENDAR: retornando cache")
+        return _calendar_cache["data"]
+
+    print("🌐 CALENDAR: buscando da RapidAPI")
+
     try:
         response = requests.get(
             CALENDAR_URL,
@@ -138,11 +165,10 @@ def get_calendar():
         )
 
         if response.status_code != 200:
-            print("STATUS != 200:", response.text)
-            return []
+            print("❌ STATUS != 200:", response.text)
+            return _calendar_cache["data"] or mock_events
 
         payload = response.json()
-        print("PAYLOAD:", payload)  # ← remova depois de validar
 
         # 🔥 SUPORTA TODOS OS FORMATOS
         if isinstance(payload, list):
@@ -159,11 +185,11 @@ def get_calendar():
             country = item.get("country")
             if country not in ("BR", "US"):
                 continue
-        
-            # 🧠 NORMALIZA IMPACTO (cobre todos os formatos)
+
+            # 🧠 NORMALIZA IMPACTO
             raw_importance = item.get("importance") or item.get("impact")
-        
             impact = None
+
             if isinstance(raw_importance, int):
                 if raw_importance >= 3:
                     impact = "high"
@@ -175,21 +201,21 @@ def get_calendar():
                     impact = "high"
                 elif "medium" in raw:
                     impact = "medium"
-        
+
             if not impact:
                 continue
-        
+
             try:
                 dt = datetime.fromisoformat(
                     item["date"].replace("Z", "+00:00")
                 ).astimezone(tz)
-        
+
                 date_str = dt.strftime("%Y-%m-%d")
                 time_str = dt.strftime("%H:%M")
             except Exception:
                 date_str = None
                 time_str = "--:--"
-        
+
             events.append({
                 "id": item.get("id"),
                 "date": date_str,
@@ -197,15 +223,24 @@ def get_calendar():
                 "country": country,
                 "impact": impact,
                 "title": item.get("title"),
-                "actual": item.get("actual"),
-                "forecast": item.get("forecast"),
+                "actual": item.get("actual") or "-",
+                "forecast": item.get("forecast") or "-"
             })
 
-        return events
+        # ===============================
+        # SALVA NO CACHE (8 HORAS)
+        # ===============================
+        _calendar_cache["data"] = events or mock_events
+        _calendar_cache["expires_at"] = now + timedelta(hours=CACHE_HOURS)
+
+        print(f"✅ CALENDAR cache salvo até {_calendar_cache['expires_at']}")
+
+        return _calendar_cache["data"]
 
     except Exception as e:
-        print("ERRO CALENDAR:", e)
-        return []
+        print("🔥 ERRO CALENDAR:", e)
+        return _calendar_cache["data"] or mock_events
+
 
 
 # =========================================================
