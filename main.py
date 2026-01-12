@@ -138,42 +138,58 @@ def get_calendar():
         )
 
         if response.status_code != 200:
-            print("Erro RapidAPI:", response.status_code, response.text)
+            print("STATUS != 200:", response.text)
             return []
 
         payload = response.json()
-        data = payload.get("result", [])
+        print("PAYLOAD:", payload)  # ← remova depois de validar
+
+        # 🔥 SUPORTA TODOS OS FORMATOS
+        if isinstance(payload, list):
+            data = payload
+        elif isinstance(payload, dict):
+            data = payload.get("result") or payload.get("data") or []
+        else:
+            data = []
 
         events = []
         tz = pytz.timezone("America/Sao_Paulo")
 
         for item in data:
-            print("ITEM BRUTO DA API:", item)  # 👈 ADICIONE AQUI
             country = item.get("country")
             if country not in ("BR", "US"):
                 continue
-
-            # 🔥 IMPACTO REAL DA API
-            raw_impact = (item.get("impact") or "").lower()
-
-            if "high" in raw_impact:
-                impact = "high"
-            elif "medium" in raw_impact:
-                impact = "medium"
-            else:
-                continue  # remove low / unknown
-
+        
+            # 🧠 NORMALIZA IMPACTO (cobre todos os formatos)
+            raw_importance = item.get("importance") or item.get("impact")
+        
+            impact = None
+            if isinstance(raw_importance, int):
+                if raw_importance >= 3:
+                    impact = "high"
+                elif raw_importance == 2:
+                    impact = "medium"
+            elif isinstance(raw_importance, str):
+                raw = raw_importance.lower()
+                if "high" in raw:
+                    impact = "high"
+                elif "medium" in raw:
+                    impact = "medium"
+        
+            if not impact:
+                continue
+        
             try:
                 dt = datetime.fromisoformat(
                     item["date"].replace("Z", "+00:00")
                 ).astimezone(tz)
-
+        
                 date_str = dt.strftime("%Y-%m-%d")
                 time_str = dt.strftime("%H:%M")
             except Exception:
                 date_str = None
                 time_str = "--:--"
-
+        
             events.append({
                 "id": item.get("id"),
                 "date": date_str,
@@ -188,9 +204,8 @@ def get_calendar():
         return events
 
     except Exception as e:
-        print("Erro calendário:", e)
+        print("ERRO CALENDAR:", e)
         return []
-
 
 
 # =========================================================
