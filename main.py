@@ -87,6 +87,7 @@ def save_cache(data):
 mock_events = [
     {
         "id": "mock-1",
+        "date": "2026-01-12",
         "time": "09:00",
         "country": "US",
         "impact": "high",
@@ -216,12 +217,18 @@ def get_calendar():
                 ).astimezone(
                     pytz.timezone("America/Sao_Paulo")
                 )
+            
+                date = dt.strftime("%Y-%m-%d")
                 time = dt.strftime("%H:%M")
+            
             except:
+                date = None
                 time = "--:--"
+
 
             events.append({
                 "id": item.get("id"),
+                "date": date,
                 "time": time,
                 "country": country,
                 "impact": impact,
@@ -229,6 +236,7 @@ def get_calendar():
                 "actual": item.get("actual") or "-",
                 "forecast": item.get("forecast") or "-"
             })
+
 
         # 2️⃣ Salva cache se vier dado real
         if events:
