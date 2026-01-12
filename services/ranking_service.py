@@ -76,6 +76,7 @@ def calculate_ranking(sort_by: str):
     # Filtro de P/VP e DY
     df = df[df['pvp'] > 0]
     df = df[df['dy'] > 0]
+    
 
     # Filtro de Setor (Remove Desenvolvimento)
     df = df[~df['setor'].astype(str).str.contains("Desenvolvimento", case=False, na=False)]
