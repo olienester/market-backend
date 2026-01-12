@@ -197,8 +197,6 @@ def get_calendar():
 
         for item in data:
             country = item.get("country")
-            if country not in ("BR", "US"):
-                continue
 
             importance = item.get("importance", 0)
             if importance >= 1:
