@@ -13,7 +13,7 @@ from services.strategy import calculate_probability
 from services.larry_williams import calculate_lw91
 # Importa o novo serviço de ranking
 from services.ranking_service import calculate_ranking 
-from services.ranking_acoes_service import calculate_acoes_ranking # Importe a função nova
+from services.ranking_acoes_service import get_relatorio_geral_acoes
 
 app = FastAPI(title="Market Data API")
 
