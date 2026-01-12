@@ -180,9 +180,15 @@ def get_calendar():
         return cached
 
     try:
+        # --- AJUSTE AQUI: FILTRO DE PAÍSES ---
+        # "US,BR" traz notícias dos EUA e do Brasil. 
+        # Se quiser só Brasil, deixe apenas "BR".
+        querystring = {"countries": "US,BR"} 
+
         response = requests.get(
             CALENDAR_URL,
             headers=CALENDAR_HEADERS,
+            params=querystring,  # <--- Passando o parâmetro aqui
             timeout=15
         )
 
@@ -198,6 +204,7 @@ def get_calendar():
         for item in data:
             country = item.get("country")
 
+            # Filtra importância (Remove notícias irrelevantes/low)
             importance = item.get("importance", 0)
             if importance >= 1:
                 impact = "high"
@@ -209,20 +216,20 @@ def get_calendar():
             if impact == "low":
                 continue
 
+            # Formata Data e Hora para Brasil (UTC-3)
             try:
                 dt = datetime.fromisoformat(
                     item["date"].replace("Z", "+00:00")
                 ).astimezone(
                     pytz.timezone("America/Sao_Paulo")
                 )
-            
+                
                 date = dt.strftime("%Y-%m-%d")
                 time = dt.strftime("%H:%M")
-            
+                
             except:
                 date = None
                 time = "--:--"
-
 
             events.append({
                 "id": item.get("id"),
@@ -234,7 +241,6 @@ def get_calendar():
                 "actual": item.get("actual") or "-",
                 "forecast": item.get("forecast") or "-"
             })
-
 
         # 2️⃣ Salva cache se vier dado real
         if events:
