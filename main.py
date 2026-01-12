@@ -29,24 +29,11 @@ app.add_middleware(
 )
 
 # ===============================
-# CACHE EM MEMÓRIA (CALENDÁRIO)
-# ===============================
-_calendar_cache = {
-    "data": None,
-    "expires_at": None
-}
-
-CACHE_HOURS = 24  # 🔥 24h = 1 chamada/dia = ~30/mês
-
-# ===============================
 # CONFIG RapidAPI (Calendário)
 # ===============================
 RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY")
 
-CALENDAR_URL = (
-    "https://economic-events-calendar.p.rapidapi.com/"
-    "economic-events/tradingview?countries=US,BR"
-)
+CALENDAR_URL = "https://economic-events-calendar.p.rapidapi.com/economic-events/tradingview"
 
 CALENDAR_HEADERS = {
     "x-rapidapi-key": RAPIDAPI_KEY,
@@ -54,20 +41,61 @@ CALENDAR_HEADERS = {
 }
 
 # ===============================
-# MOCK FALLBACK (Calendário)
+# CACHE (24h)
+# ===============================
+CACHE_FILE = "calendar_cache.json"
+CACHE_TTL_HOURS = 24
+
+
+def load_cache():
+    if not os.path.exists(CACHE_FILE):
+        return None
+
+    try:
+        with open(CACHE_FILE, "r", encoding="utf-8") as f:
+            cache = json.load(f)
+
+        cache_time = datetime.fromisoformat(cache["timestamp"])
+        if datetime.utcnow() - cache_time < timedelta(hours=CACHE_TTL_HOURS):
+            return cache["data"]
+
+    except Exception as e:
+        print("Erro ao ler cache:", e)
+
+    return None
+
+
+def save_cache(data):
+    try:
+        with open(CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "data": data
+                },
+                f,
+                ensure_ascii=False,
+                indent=2
+            )
+    except Exception as e:
+        print("Erro ao salvar cache:", e)
+
+
+# ===============================
+# MOCK (fallback)
 # ===============================
 mock_events = [
     {
         "id": "mock-1",
-        "date": datetime.now().strftime("%Y-%m-%d"),
         "time": "09:00",
-        "country": "BR",
+        "country": "US",
         "impact": "high",
-        "title": "IPCA (Mensal)",
+        "title": "Fed Interest Rate Decision",
         "actual": "-",
-        "forecast": "0,30%"
+        "forecast": "-"
     }
 ]
+
 
 # ===============================
 # ENDPOINTS BÁSICOS
@@ -140,25 +168,15 @@ def get_quote(ticker: str):
     except Exception:
         return {"error": "not found"}
 
-# =========================================================
-# CALENDÁRIO ECONÔMICO (CACHE 24H)
-# =========================================================
+# ===============================
+# ENDPOINT CALENDAR
+# ===============================
 @app.get("/calendar")
 def get_calendar():
-    global _calendar_cache
-
-    now = datetime.utcnow()
-
-    # ✅ CACHE VÁLIDO
-    if (
-        _calendar_cache["data"]
-        and _calendar_cache["expires_at"]
-        and now < _calendar_cache["expires_at"]
-    ):
-        print("📦 Calendar: retornando cache")
-        return _calendar_cache["data"]
-
-    print("🌐 Calendar: buscando da RapidAPI")
+    # 1️⃣ Tenta cache primeiro
+    cached = load_cache()
+    if cached:
+        return cached
 
     try:
         response = requests.get(
@@ -168,59 +186,43 @@ def get_calendar():
         )
 
         if response.status_code != 200:
-            print("❌ RapidAPI status:", response.status_code)
-            return _calendar_cache["data"] or mock_events
+            print("Status RapidAPI:", response.status_code)
+            return mock_events
 
         payload = response.json()
-
-        if isinstance(payload, dict):
-            data = payload.get("result") or payload.get("data") or []
-        elif isinstance(payload, list):
-            data = payload
-        else:
-            data = []
+        data = payload.get("result", [])
 
         events = []
-        tz = pytz.timezone("America/Sao_Paulo")
 
         for item in data:
             country = item.get("country")
-            if country not in ("US", "BR"):
+            if country not in ("BR", "US"):
                 continue
 
-            raw_importance = item.get("importance") or item.get("impact")
-            impact = None
+            importance = item.get("importance", 0)
+            if importance >= 1:
+                impact = "high"
+            elif importance == 0:
+                impact = "medium"
+            else:
+                impact = "low"
 
-            if isinstance(raw_importance, int):
-                if raw_importance >= 3:
-                    impact = "high"
-                elif raw_importance == 2:
-                    impact = "medium"
-            elif isinstance(raw_importance, str):
-                raw = raw_importance.lower()
-                if "high" in raw:
-                    impact = "high"
-                elif "medium" in raw:
-                    impact = "medium"
-
-            if not impact:
+            if impact == "low":
                 continue
 
             try:
                 dt = datetime.fromisoformat(
                     item["date"].replace("Z", "+00:00")
-                ).astimezone(tz)
-
-                date_str = dt.strftime("%Y-%m-%d")
-                time_str = dt.strftime("%H:%M")
-            except Exception:
-                date_str = None
-                time_str = "--:--"
+                ).astimezone(
+                    pytz.timezone("America/Sao_Paulo")
+                )
+                time = dt.strftime("%H:%M")
+            except:
+                time = "--:--"
 
             events.append({
                 "id": item.get("id"),
-                "date": date_str,
-                "time": time_str,
+                "time": time,
                 "country": country,
                 "impact": impact,
                 "title": item.get("title"),
@@ -228,16 +230,16 @@ def get_calendar():
                 "forecast": item.get("forecast") or "-"
             })
 
-        # 💾 SALVA CACHE (24H)
-        _calendar_cache["data"] = events or mock_events
-        _calendar_cache["expires_at"] = now + timedelta(hours=CACHE_HOURS)
+        # 2️⃣ Salva cache se vier dado real
+        if events:
+            save_cache(events)
+            return events
 
-        print(f"✅ Calendar cache salvo até {_calendar_cache['expires_at']}")
-        return _calendar_cache["data"]
+        return mock_events
 
     except Exception as e:
-        print("🔥 ERRO CALENDAR:", e)
-        return _calendar_cache["data"] or mock_events
+        print("Erro calendário:", e)
+        return mock_events
 
 # =========================================================
 # RANKINGS
