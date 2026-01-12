@@ -138,6 +138,7 @@ def get_calendar():
         )
 
         if response.status_code != 200:
+            print("Erro RapidAPI:", response.status_code, response.text)
             return []
 
         payload = response.json()
@@ -147,18 +148,20 @@ def get_calendar():
         tz = pytz.timezone("America/Sao_Paulo")
 
         for item in data:
+            print("ITEM BRUTO DA API:", item)  # 👈 ADICIONE AQUI
             country = item.get("country")
             if country not in ("BR", "US"):
                 continue
 
-            importance = item.get("importance", 0)
+            # 🔥 IMPACTO REAL DA API
+            raw_impact = (item.get("impact") or "").lower()
 
-            if importance >= 3:
+            if "high" in raw_impact:
                 impact = "high"
-            elif importance == 2:
+            elif "medium" in raw_impact:
                 impact = "medium"
             else:
-                continue  # remove impacto baixo
+                continue  # remove low / unknown
 
             try:
                 dt = datetime.fromisoformat(
@@ -173,7 +176,7 @@ def get_calendar():
 
             events.append({
                 "id": item.get("id"),
-                "date": date_str,     # ✅ DATA DISPONÍVEL
+                "date": date_str,
                 "time": time_str,
                 "country": country,
                 "impact": impact,
@@ -187,6 +190,7 @@ def get_calendar():
     except Exception as e:
         print("Erro calendário:", e)
         return []
+
 
 
 # =========================================================
