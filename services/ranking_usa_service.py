@@ -6,7 +6,7 @@ import io
 import time
 
 # Cache de 4 horas para a lista completa (são 7MB de dados)
-CACHE_TIMEOUT = 14400 
+CACHE_TIMEOUT = 86400 
 _cache_usa_full = {"timestamp": 0, "data": None}
 
 def get_all_usa_tickers():
