@@ -242,34 +242,72 @@ def get_calendar():
 @app.get("/api/ranking")
 def get_ranking(type: str = Query("shank", enum=["shank", "smart"])):
     try:
+        # Baixa os dados
         df = fetch_fundamentus_data().copy()
         
+        # Correção do erro: Inicializa result_df vazio para garantir que a variável exista
+        result_df = pd.DataFrame()
+
+        # ---------------------------------------------------------
+        # LÓGICA 1: SHANK
+        # ---------------------------------------------------------
         if type == 'shank':
-            # Lógica Shank
-            df['rank_pvp'] = df['pvp'].rank(ascending=False) # Nota: No Excel original você usava ordem decrescente pra P/VP? Geralmente menor P/VP é melhor (ascending=True). Mantive sua lógica original do Excel.
-            df['rank_dy'] = df['dy'].rank(ascending=True)    # Nota: Geralmente maior DY é melhor (ascending=False).
+            # Rank P/VP (Menor é melhor -> ascending=True)
+            # Obs: No Excel Shank original, buscam-se ativos descontados (P/VP baixo)
+            df['rank_pvp'] = df['pvp'].rank(ascending=True)
+            
+            # Rank DY (Maior é melhor -> ascending=False)
+            df['rank_dy'] = df['dy'].rank(ascending=False)
+            
+            # Soma dos rankings (Menor soma é o melhor)
             df['shank_score'] = df['rank_pvp'] + df['rank_dy']
-            df = df.sort_values('shank_score', ascending=False)
+            
+            # Ordena pela menor pontuação
+            df = df.sort_values('shank_score', ascending=True)
+            
+            # Cria posição (1º, 2º...)
             df['ranking_pos'] = range(1, len(df) + 1)
+            
             result_df = df[['ticker', 'setor', 'dy', 'pvp', 'ranking_pos']]
 
+        # ---------------------------------------------------------
+        # LÓGICA 2: SMART FIIs
+        # ---------------------------------------------------------
         elif type == 'smart':
-            # Lógica Smart
+            # Variáveis que não existem no Fundamentus público (zeradas para não quebrar)
             rentab_acum = 0 
             volatilidade = 0 
             
+            # Log na liquidez para normalizar a escala (ex: 1.000.000 vira ~13.8)
             liq_score = np.log1p(df['liquidez']) 
             
+            # Fórmula Smart
             df['smart_score'] = (
                 (df['dy'] * 25 + rentab_acum * 25) * 0.5 + 
                 ((1 - df['pvp']) * 15 + (1 / (1 + volatilidade)) * 15) * 0.3 + 
                 (liq_score * 10) * 0.2
             )
+            
+            # Ordena Score Descendente (Maior pontuação vence)
             df = df.sort_values('smart_score', ascending=False)
+            
+            # Cria posição
             df['ranking_pos'] = range(1, len(df) + 1)
+            
             result_df = df[['ticker', 'setor', 'dy', 'pvp', 'ranking_pos', 'smart_score']]
+            
+        else:
+            # Fallback de segurança (caso o enum falhe ou entre algo estranho)
+            result_df = df[['ticker', 'setor', 'dy', 'pvp']].head(50)
+            result_df['ranking_pos'] = 0
 
+        # Retorna Top 50 convertendo para dicionário
+        if result_df.empty:
+            return []
+            
         return result_df.head(50).to_dict(orient='records')
 
     except Exception as e:
+        # Imprime o erro no terminal do Render para facilitar o debug
+        print(f"Erro no ranking: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
