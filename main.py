@@ -6,6 +6,11 @@ import yfinance as yf
 import pandas as pd
 import pytz
 import os
+import json
+
+# --- IMPORTAÇÕES FIREBASE ---
+import firebase_admin
+from firebase_admin import credentials, firestore
 
 # --- IMPORTAÇÕES DOS SERVIÇOS ---
 from services.market_data import get_stock_data
@@ -16,6 +21,29 @@ from services.ranking_acoes_service import get_relatorio_geral_acoes
 from services.ranking_usa_service import get_relatorio_geral_usa
 
 app = FastAPI(title="Market Data API")
+
+# ===============================
+# CONFIGURAÇÃO DO FIREBASE
+# ===============================
+# Verifica se o Firebase já não foi inicializado para evitar erros no reload
+if not firebase_admin._apps:
+    try:
+        # O arquivo 'firebase_credentials.json' deve existir na raiz (criado pelo Render Secret Files)
+        if os.path.exists("firebase_credentials.json"):
+            cred = credentials.Certificate("firebase_credentials.json")
+            firebase_admin.initialize_app(cred)
+            print("✅ Firebase inicializado com sucesso!")
+        else:
+            print("⚠️ Aviso: Arquivo firebase_credentials.json não encontrado.")
+    except Exception as e:
+        print(f"❌ Erro ao inicializar Firebase: {e}")
+
+# Cliente do Banco de Dados
+try:
+    db = firestore.client()
+except:
+    db = None
+    print("⚠️ Firestore não disponível (verifique as credenciais).")
 
 # ===============================
 # CONFIG CORS
@@ -41,11 +69,10 @@ CALENDAR_HEADERS = {
 }
 
 # ===============================
-# CACHE (24h)
+# CACHE LOCAL (Backup)
 # ===============================
 CACHE_FILE = "calendar_cache.json"
 CACHE_TTL_HOURS = 24
-
 
 def load_cache():
     if not os.path.exists(CACHE_FILE):
@@ -64,7 +91,6 @@ def load_cache():
 
     return None
 
-
 def save_cache(data):
     try:
         with open(CACHE_FILE, "w", encoding="utf-8") as f:
@@ -80,6 +106,43 @@ def save_cache(data):
     except Exception as e:
         print("Erro ao salvar cache:", e)
 
+# ===============================
+# FUNÇÃO PARA SALVAR NO FIREBASE
+# ===============================
+def save_to_firestore(events):
+    if db is None:
+        return
+    
+    try:
+        collection_ref = db.collection("economic_calendar")
+        batch = db.batch()
+        
+        count = 0
+        for event in events:
+            # Usa o ID do evento como chave do documento para evitar duplicatas
+            doc_id = str(event['id'])
+            doc_ref = collection_ref.document(doc_id)
+            
+            # Adiciona o timestamp de quando foi salvo
+            event_copy = event.copy()
+            event_copy['saved_at'] = firestore.SERVER_TIMESTAMP
+            
+            batch.set(doc_ref, event_copy)
+            count += 1
+            
+            # O Firestore tem limite de 500 operações por batch, mas seu calendário é menor
+            if count >= 400:
+                batch.commit()
+                batch = db.batch()
+                count = 0
+                
+        if count > 0:
+            batch.commit()
+            
+        print(f"✅ {len(events)} eventos salvos/atualizados no Firebase.")
+        
+    except Exception as e:
+        print(f"❌ Erro ao salvar no Firestore: {e}")
 
 # ===============================
 # MOCK (fallback)
@@ -97,13 +160,12 @@ mock_events = [
     }
 ]
 
-
 # ===============================
 # ENDPOINTS BÁSICOS
 # ===============================
 @app.get("/")
 def root():
-    return {"status": "API funcionando"}
+    return {"status": "API funcionando", "firebase": "Conectado" if db else "Desconectado"}
 
 @app.get("/stock/{symbol}")
 def stock(symbol: str, interval: str = "1d", period: str = "1y"):
@@ -173,22 +235,20 @@ def get_quote(ticker: str):
 # ENDPOINT CALENDAR
 # ===============================
 @app.get("/calendar")
-def get_calendar():
-    # 1️⃣ Tenta cache primeiro
-    cached = load_cache()
-    if cached:
-        return cached
+def get_calendar(force_refresh: bool = False):
+    # 1️⃣ Tenta cache primeiro (se não forçado refresh)
+    if not force_refresh:
+        cached = load_cache()
+        if cached:
+            return cached
 
     try:
-        # --- AJUSTE AQUI: FILTRO DE PAÍSES ---
-        # "US,BR" traz notícias dos EUA e do Brasil. 
-        # Se quiser só Brasil, deixe apenas "BR".
         querystring = {"countries": "US,BR"} 
 
         response = requests.get(
             CALENDAR_URL,
             headers=CALENDAR_HEADERS,
-            params=querystring,  # <--- Passando o parâmetro aqui
+            params=querystring,
             timeout=15
         )
 
@@ -204,7 +264,7 @@ def get_calendar():
         for item in data:
             country = item.get("country")
 
-            # Filtra importância (Remove notícias irrelevantes/low)
+            # Filtra importância 
             importance = item.get("importance", 0)
             if importance >= 1:
                 impact = "high"
@@ -244,7 +304,8 @@ def get_calendar():
 
         # 2️⃣ Salva cache se vier dado real
         if events:
-            save_cache(events)
+            save_cache(events)       # Salva no arquivo local (temporário)
+            save_to_firestore(events) # SALVA NO FIREBASE (PERSISTENTE)
             return events
 
         return mock_events
