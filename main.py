@@ -116,7 +116,7 @@ def load_events_from_db(today_str):
         return []
 
 def save_events_to_db(events):
-    """Salva a lista no banco"""
+    """Salva a lista no banco com proteção contra IDs vazios"""
     if db is None or not events: return
     try:
         batch = db.batch()
@@ -124,8 +124,24 @@ def save_events_to_db(events):
         
         count = 0
         for event in events:
-            doc_ref = collection.document(str(event['id']))
+            # --- CORREÇÃO DO ERRO DE CAMINHO ---
+            raw_id = event.get('id')
+            
+            # Se o ID vier vazio ou None da API, criamos um ID artificial
+            if not raw_id or raw_id == "None":
+                # Ex: "2026-01-13_US_Fed_Interest"
+                safe_title = str(event.get('title', 'unknown'))[:20].replace(" ", "_").replace("/", "-")
+                safe_id = f"{event.get('date')}_{event.get('country')}_{safe_title}"
+            else:
+                safe_id = str(raw_id)
+            
+            # Garante que não tem barras '/' no ID (o que também quebra o path)
+            safe_id = safe_id.replace("/", "_")
+
+            # Agora é seguro criar a referência
+            doc_ref = collection.document(safe_id)
             batch.set(doc_ref, event)
+            
             count += 1
             if count >= 400:
                 batch.commit()
@@ -133,9 +149,10 @@ def save_events_to_db(events):
                 count = 0
         
         if count > 0: batch.commit()
-        print(f"✅ {len(events)} eventos salvos no banco.")
+        print(f"✅ {len(events)} eventos salvos no banco com sucesso.")
+        
     except Exception as e:
-        print(f"Erro ao salvar eventos: {e}")
+        print(f"❌ Erro ao salvar eventos: {e}")
 
 # ===============================
 # ENDPOINT CALENDAR
