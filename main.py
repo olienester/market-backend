@@ -13,7 +13,6 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 
 # --- IMPORTAÇÕES DOS SERVIÇOS ---
-# Mantenha seus arquivos na pasta services como estão
 from services.market_data import get_stock_data
 from services.strategy import calculate_probability
 from services.larry_williams import calculate_lw91
@@ -37,12 +36,11 @@ if not firebase_admin._apps:
     except Exception as e:
         print(f"❌ Erro ao inicializar Firebase: {e}")
 
-# Cliente do Banco de Dados
 try:
     db = firestore.client()
 except:
     db = None
-    print("⚠️ Firestore não disponível (verifique as credenciais).")
+    print("⚠️ Firestore não disponível.")
 
 # ===============================
 # CONFIG CORS
@@ -56,7 +54,7 @@ app.add_middleware(
 )
 
 # ===============================
-# CONFIG RapidAPI (Calendário)
+# CONFIG RapidAPI
 # ===============================
 RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY")
 CALENDAR_URL = "https://economic-events-calendar.p.rapidapi.com/economic-events/tradingview"
@@ -66,81 +64,59 @@ CALENDAR_HEADERS = {
 }
 
 # ===============================
-# MOCK (Fallback em caso de erro grave)
-# ===============================
-mock_events = [
-    {
-        "id": "mock-1",
-        "date": datetime.now().strftime("%Y-%m-%d"),
-        "time": "09:00",
-        "country": "US",
-        "impact": "high",
-        "title": "Dados Indisponíveis (Mock)",
-        "actual": "-",
-        "forecast": "-"
-    }
-]
-
-# ===============================
-# FUNÇÕES DE CONTROLE (O Segredo da Economia)
+# FUNÇÕES DE BANCO DE DADOS
 # ===============================
 
 def check_daily_log(today_str):
-    """
-    Verifica no 'system_control' se já rodamos a API hoje.
-    Retorna True se JÁ ATUALIZOU hoje.
-    """
+    """Verifica se já atualizamos a lista COMPLETA hoje."""
     if db is None: return False
     try:
-        # Busca o documento de controle
         doc = db.collection("system_control").document("calendar_sync").get()
         if doc.exists:
             data = doc.to_dict()
-            last_check = data.get("last_checked_date")
-            # Se a data salva for igual a hoje, retorna True (Já gastamos a cota)
-            if last_check == today_str:
+            if data.get("last_checked_date") == today_str:
                 return True 
         return False
     except Exception as e:
-        print(f"Erro ao ler log diário: {e}")
+        print(f"Erro check log: {e}")
         return False
 
 def update_daily_log(today_str):
-    """
-    Marca no banco que hoje já foi verificado.
-    Isso impede novas chamadas à API até amanhã.
-    """
+    """Marca que hoje já atualizamos."""
     if db is None: return
     try:
         db.collection("system_control").document("calendar_sync").set({
             "last_checked_date": today_str,
             "updated_at": firestore.SERVER_TIMESTAMP
         })
-        print(f"🔒 Trava diária ativada para: {today_str}")
     except Exception as e:
-        print(f"Erro ao atualizar log diário: {e}")
+        print(f"Erro update log: {e}")
 
-def load_events_from_db(date_str):
-    """Busca eventos salvos no banco para a data especificada"""
+def load_events_from_db(today_str):
+    """
+    Busca eventos DO FUTURO (Hoje em diante).
+    Não filtra só hoje, pega tudo que é >= hoje.
+    """
     if db is None: return []
     try:
-        # Filtra apenas eventos da data solicitada
+        # Pega eventos onde a data é maior ou igual a hoje
         docs = db.collection("economic_calendar")\
-                 .where("date", "==", date_str)\
+                 .where("date", ">=", today_str)\
                  .stream()
         
         events = []
         for doc in docs:
             events.append(doc.to_dict())
         
-        # Ordena por horário
-        events.sort(key=lambda x: x['time'])
+        # Ordena primeiro por data, depois por hora
+        events.sort(key=lambda x: (x['date'], x['time']))
         return events
-    except Exception:
+    except Exception as e:
+        print(f"Erro leitura DB: {e}")
         return []
 
 def save_events_to_db(events):
-    """Salva a lista de eventos no Firestore usando Batch (Lote)"""
+    """Salva a lista no banco"""
     if db is None or not events: return
     try:
         batch = db.batch()
@@ -148,11 +124,9 @@ def save_events_to_db(events):
         
         count = 0
         for event in events:
-            # Usa o ID do evento como ID do documento
             doc_ref = collection.document(str(event['id']))
             batch.set(doc_ref, event)
             count += 1
-            # Firestore limita batch a 500 operações
             if count >= 400:
                 batch.commit()
                 batch = db.batch()
@@ -164,35 +138,27 @@ def save_events_to_db(events):
         print(f"Erro ao salvar eventos: {e}")
 
 # ===============================
-# ENDPOINT INTELIGENTE (CALENDÁRIO)
+# ENDPOINT CALENDAR
 # ===============================
 @app.get("/calendar")
 def get_calendar(force_refresh: bool = False):
-    # 1. Define a data de HOJE no fuso horário do Brasil
+    # Data de referência (Hoje)
     tz_sp = pytz.timezone("America/Sao_Paulo")
     today_str = datetime.now(tz_sp).strftime("%Y-%m-%d")
 
-    print(f"📅 Requisição para data: {today_str}")
-
-    # 2. VERIFICAÇÃO DE ECONOMIA (Check-in no Banco)
+    # 1. VERIFICAÇÃO DE ECONOMIA (Trava Diária)
+    # Se já atualizamos hoje, não chama a API, apenas lê o banco.
     if not force_refresh:
-        already_checked = check_daily_log(today_str)
-        
-        if already_checked:
-            print("🛑 Cota diária já utilizada. Retornando dados do Banco (Cache).")
-            db_events = load_events_from_db(today_str)
-            return db_events # Retorna lista (pode ser vazia se hoje não tiver notícias)
+        if check_daily_log(today_str):
+            print("🛑 Cache do dia válido. Retornando dados do banco.")
+            return load_events_from_db(today_str)
 
-    # 3. CHAMADA À API (Só acontece 1x por dia)
-    print("🌍 Iniciando chamada para RapidAPI (Gasto de Crédito)...")
+    # 2. CHAMADA API (Atualiza a lista completa)
+    print("🌍 Buscando TODAS as notícias na RapidAPI...")
     
     try:
-        # Pede apenas os dados de HOJE (from/to)
-        querystring = {
-            "countries": "US,BR",
-            "from": today_str,
-            "to": today_str
-        }
+        # Removemos 'from' e 'to' para pegar tudo o que a API mandar
+        querystring = {"countries": "US,BR"}
 
         response = requests.get(
             CALENDAR_URL,
@@ -216,16 +182,18 @@ def get_calendar(force_refresh: bool = False):
                 elif importance == 0: impact = "medium"
                 else: impact = "low"
 
+                # Se quiser ignorar as "low", mantenha isso. 
+                # Se quiser tudo, comente as duas linhas abaixo.
                 if impact == "low": continue
 
-                # Tratamento de Data/Hora
                 try:
                     dt = datetime.fromisoformat(item["date"].replace("Z", "+00:00")).astimezone(tz_sp)
                     date_fmt = dt.strftime("%Y-%m-%d")
                     time_fmt = dt.strftime("%H:%M")
                     
-                    # Segurança extra: Garante que é evento de hoje
-                    if date_fmt != today_str: continue
+                    # AQUI MUDOU: Não filtramos mais "if date != today".
+                    # Aceitamos todas as datas que vierem.
+                    
                 except:
                     date_fmt = None
                     time_fmt = "--:--"
@@ -241,25 +209,23 @@ def get_calendar(force_refresh: bool = False):
                     "forecast": item.get("forecast") or "-"
                 })
             
-            # 4. SALVA OS DADOS (Se houver eventos)
+            # Salva tudo o que veio
             if events:
                 save_events_to_db(events)
-            else:
-                print("⚠️ API retornou 0 eventos relevantes para hoje.")
+            
+            # Ativa a trava: "Hoje já busquei as notícias da semana"
+            update_daily_log(today_str)
+            
+            # Ordena para retorno imediato
+            events.sort(key=lambda x: (x['date'], x['time']))
+            return events
 
         else:
             print(f"❌ Erro API: {response.status_code}")
-        
-        # 5. O PASSO MAIS IMPORTANTE: ATIVA A TRAVA
-        # Marcamos que hoje já foi verificado, independente se veio dado ou não.
-        # Isso impede que o sistema fique tentando de novo e gastando crédito.
-        update_daily_log(today_str)
-        
-        return events
+            return load_events_from_db(today_str) # Fallback
 
     except Exception as e:
-        print(f"❌ Erro fatal no calendário: {e}")
-        # Se deu erro, tenta ler o que tem no banco por garantia
+        print(f"❌ Erro fatal: {e}")
         return load_events_from_db(today_str)
 
 # ===============================
@@ -267,33 +233,21 @@ def get_calendar(force_refresh: bool = False):
 # ===============================
 @app.get("/")
 def root():
-    return {"status": "API Online", "firebase": "Conectado" if db else "Offline"}
+    return {"status": "Online"}
 
 @app.get("/stock/{symbol}")
 def stock(symbol: str, interval: str = "1d", period: str = "1y"):
     data = get_stock_data(symbol, interval, period)
-    if not data:
-        raise HTTPException(status_code=404, detail="Dados não encontrados")
-    return {
-        "symbol": symbol,
-        "interval": interval,
-        "period": period,
-        "data": data
-    }
-
+    if not data: raise HTTPException(status_code=404, detail="N/A")
+    return {"symbol": symbol, "data": data}
+    
 @app.get("/strategy/{symbol}")
 def get_strategy(symbol: str):
-    data = calculate_probability(symbol)
-    if not data:
-        return {"error": "Não foi possível analisar o ativo"}
-    return data
+    return calculate_probability(symbol) or {"error": "Erro"}
 
 @app.get("/strategy/91/{symbol}")
 def get_strategy_lw91(symbol: str, interval: str = "1d"):
-    result = calculate_lw91(symbol, interval)
-    if result is None:
-        raise HTTPException(status_code=404, detail="Erro no cálculo")
-    return result
+    return calculate_lw91(symbol, interval)
 
 @app.get("/market/dividends/{ticker}")
 def get_dividends(ticker: str):
@@ -301,12 +255,9 @@ def get_dividends(ticker: str):
     try:
         asset = yf.Ticker(symbol)
         divs = asset.dividends
-        if divs.empty:
-            return []
-
+        if divs.empty: return []
         start_date = pd.Timestamp.now(tz=divs.index.tz) - pd.DateOffset(months=12)
         recent_divs = divs[divs.index >= start_date]
-
         results = []
         for date, value in recent_divs.items():
             results.append({
@@ -314,11 +265,8 @@ def get_dividends(ticker: str):
                 "valor": float(value),
                 "tipo": "Provento"
             })
-
         return list(reversed(results))
-    except Exception as e:
-        print(f"Erro dividendos {symbol}:", e)
-        return []
+    except: return []
 
 @app.get("/market/quote/{ticker}")
 def get_quote(ticker: str):
@@ -330,23 +278,14 @@ def get_quote(ticker: str):
             "price": info.get("currentPrice"),
             "regularMarketChangePercent": info.get("regularMarketChangePercent", 0) * 100
         }
-    except Exception:
-        return {"error": "not found"}
+    except: return {"error": "not found"}
 
 @app.get("/api/ranking")
-def get_ranking_endpoint(sort_by: str = Query("shank", enum=["shank", "smart"])):
-    try:
-        return calculate_ranking(sort_by)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+def get_ranking_endpoint(sort_by: str = Query("shank")):
+    return calculate_ranking(sort_by)
 
 @app.get("/api/ranking/acoes/geral")
-def get_ranking_geral():
-    return get_relatorio_geral_acoes()
+def get_ranking_geral(): return get_relatorio_geral_acoes()
 
 @app.get("/api/ranking/usa/geral")
-def get_ranking_usa_endpoint():
-    try:
-        return get_relatorio_geral_usa()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+def get_ranking_usa_endpoint(): return get_relatorio_geral_usa()
