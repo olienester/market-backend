@@ -8,3 +8,4 @@ lxml
 numpy
 pytz
 cloudscraper
+firebase-admin
