@@ -19,6 +19,7 @@ from services.larry_williams import calculate_lw91
 from services.ranking_service import calculate_ranking
 from services.ranking_acoes_service import get_relatorio_geral_acoes
 from services.ranking_usa_service import get_relatorio_geral_usa
+from services.wyckoff_service import analyze_wyckoff
 
 app = FastAPI(title="Market Data API")
 
@@ -306,3 +307,10 @@ def get_ranking_geral(): return get_relatorio_geral_acoes()
 
 @app.get("/api/ranking/usa/geral")
 def get_ranking_usa_endpoint(): return get_relatorio_geral_usa()
+
+@app.get("/analysis/wyckoff/{symbol}")
+def get_wyckoff_analysis(symbol: str):
+    result = analyze_wyckoff(symbol)
+    if not result:
+        return {"error": "Não foi possível analisar o ativo. Histórico insuficiente."}
+    return result
