@@ -309,8 +309,23 @@ def get_ranking_geral(): return get_relatorio_geral_acoes()
 def get_ranking_usa_endpoint(): return get_relatorio_geral_usa()
 
 @app.get("/analysis/wyckoff/{symbol}")
-def get_wyckoff_analysis(symbol: str):
-    result = analyze_wyckoff(symbol)
+def get_wyckoff_analysis(
+    symbol: str, 
+    period: str = Query("6mo", description="Período de análise (ex: 1mo, 6mo, 1y)"),
+    interval: str = Query("1d", description="Intervalo dos candles (ex: 60m, 1d, 1wk)")
+):
+    """
+    Retorna a análise Wyckoff.
+    Para 60m, use: /analysis/wyckoff/PETR4?period=1mo&interval=60m
+    """
+    
+    # Validação simples para intraday (yfinance pede period curto para dados intraday)
+    if interval == "60m" and period not in ["1mo", "5d", "1wk"]:
+        period = "1mo" # Força 1 mês se pedir 60m, senão o yfinance pode falhar
+
+    result = analyze_wyckoff(symbol, period=period, interval=interval)
+    
     if not result:
         return {"error": "Não foi possível analisar o ativo. Histórico insuficiente."}
+    
     return result
