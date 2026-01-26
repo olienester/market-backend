@@ -274,16 +274,16 @@ def fetch_bulk_fundamentals(tickers_list):
                         'ativo': ticker,
                         'setor': info.get('sector', 'Outros'),
                         'preco': price,
-                        'dy': (info.get('dividendYield', 0) or 0) * 100,
+                        'dy': (info.get('dividendYield', 0) or 0),
                         'p_l': info.get('trailingPE', 0),
                         'p_vp': info.get('priceToBook', 0),
-                        'roe': (info.get('returnOnEquity', 0) or 0) * 100,
-                        'margem_liquida': (info.get('profitMargins', 0) or 0) * 100,
+                        'roe': (info.get('returnOnEquity', 0) or 0),
+                        'margem_liquida': (info.get('profitMargins', 0) or 0),
                         'div_liq_patrimonio': info.get('debtToEquity', 0) / 100 if info.get('debtToEquity') else 0,
                         'ev_ebit': info.get('enterpriseToEbitda', 0),
                         'lpa': info.get('trailingEps', 0),
-                        'roic': (info.get('returnOnAssets', 0) or 0) * 100,  # Proxy
-                        'cagr_lucros_5a': (info.get('earningsGrowth', 0) or 0) * 100
+                        'roic': (info.get('returnOnAssets', 0) or 0),  # Proxy
+                        'cagr_lucros_5a': (info.get('earningsGrowth', 0) or 0) 
                     }
                     dados.append(dado)
                 except:
@@ -329,6 +329,13 @@ def get_relatorio_geral_usa():
     if df.empty:
         return []
 
+    # 🔽 FILTRO: remove ações sem dividendos
+    df = df[df['dy'] > 0]
+    
+    if df.empty:
+        return []
+
+    
     # --- APLICAÇÃO DAS ESTRATÉGIAS (Mesma lógica anterior) ---
 
     # JOEL GREENBLATT
@@ -347,7 +354,7 @@ def get_relatorio_geral_usa():
     df['RANKING_GRAHAM'] = df['margem_seg'].rank(ascending=False)
 
     # DÉCIO BAZIN
-    df['preco_teto_bazin'] = (df['preco'] * (df['dy']/100)) / 0.04  # 4% Dólar
+    df['preco_teto_bazin'] = (df['preco'] * (df['dy'])) / 0.04  # 4% Dólar
     df['upside_bazin'] = (df['preco_teto_bazin'] / df['preco']) - 1
     df['RANKING_BAZIN'] = (df['upside_bazin'].rank(ascending=False) + df['dy'].rank(ascending=False)).rank(ascending=True)
 
