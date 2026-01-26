@@ -125,6 +125,7 @@ def get_relatorio_geral_acoes():
     # 1. FILTROS BÁSICOS (Liquidez, Lucro, DY)
     df = df[df['liq_media_diaria'] >= 200000]
     df = df[df['p_l'] > 0]
+    df = df[df['dy'] > 0]
     
     # ==============================================================================
     # CÁLCULO DE TODOS OS RANKINGS (Mesma lógica anterior, tudo junto)
