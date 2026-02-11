@@ -138,32 +138,35 @@ def get_relatorio_geral_acoes():
         'Energia', 'Utilidade Pública',
     ]
     
-    # garante base limpa
-    df['ev_ebit'] = pd.to_numeric(df['ev_ebit'], errors='coerce').fillna(0)
-    df['roic']    = pd.to_numeric(df['roic'], errors='coerce').fillna(0)
-    
-    # Earnings Yield (seguro)
-    df['earning_yield'] = np.where(df['ev_ebit'] > 0, 1 / df['ev_ebit'], 0)
-    
-    # Ranks base
-    df['rank_earning_yield'] = df['earning_yield'].rank(ascending=False, method='dense')
-    df['rank_roic'] = df['roic'].rank(ascending=False, method='dense')
-    
-    # Score base
-    df['score_joel'] = df['rank_earning_yield'] + df['rank_roic']
-    
-    # Penalização por setor
     PENALTY = 1_000_000
-    df['penalty_joel'] = np.where(
-        df['setor'].isin(SETORES_JOEL_PENALIZADOS),
-        PENALTY,
-        0
-    )
     
-    # Score final
-    df['score_joel'] = df['score_joel'] + df['penalty_joel']
+    # BASE SEGURA (SEM MEXER NO GLOBAL)
     
-    # Ranking final
+    df['ev_ebit_joel'] = pd.to_numeric(df['ev_ebit'], errors='coerce')
+    df['roic_joel']    = pd.to_numeric(df['roic'], errors='coerce')
+    
+    # SANITIZAÇÃO GREENBLATT (FIEL)
+    df['ev_ebit_joel'] = np.where((df['ev_ebit_joel'] > 0) & np.isfinite(df['ev_ebit_joel']), df['ev_ebit_joel'], np.nan)
+    
+    df['roic_joel'] = np.where((df['roic_joel'] > 0) & np.isfinite(df['roic_joel']), df['roic_joel'], np.nan)
+    
+    # EARNINGS YIELD (APENAS VÁLIDOS)
+    df['earning_yield_joel'] = 1 / df['ev_ebit_joel']
+    
+    # RANKS BASE (JOEL REAL)
+    df['rank_earning_yield_joel'] = df['earning_yield_joel'].rank(ascending=False, method='dense')
+    df['rank_roic_joel'] = df['roic_joel'].rank(ascending=False, method='dense')
+    
+    # SCORE BASE
+    df['score_joel'] = df['rank_earning_yield_joel'] + df['rank_roic_joel']
+    
+    # PENALIZAÇÃO SETOR (SEM VAZAR)
+    df['penalty_joel'] = np.where(df['setor'].isin(SETORES_JOEL_PENALIZADOS), PENALTY, 0)
+    
+    # SCORE FINAL
+    df['score_joel'] = df['score_joel'].fillna(PENALTY) + df['penalty_joel']
+    
+    # RANKING FINAL
     df['RANKING_JOEL'] = df['score_joel'].rank(ascending=True, method='dense')
 
     # --- GRAHAM ---
