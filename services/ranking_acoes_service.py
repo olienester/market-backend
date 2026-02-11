@@ -133,34 +133,38 @@ def get_relatorio_geral_acoes():
 
     # --- JOEL (Magic Formula - adaptação usando ROIC do Fundamentus) ---
     
-    setores_excluidos = [
+    SETORES_JOEL_PENALIZADOS = [
         'Financeiro', 'Bancário', 'Seguros',
         'Energia', 'Utilidade Pública',
     ]
     
-    # garante numérico (evita erro em > 0)
+    # garante base limpa
     df['ev_ebit'] = pd.to_numeric(df['ev_ebit'], errors='coerce').fillna(0)
     df['roic']    = pd.to_numeric(df['roic'], errors='coerce').fillna(0)
     
-    df_joel = df.loc[~df['setor'].isin(setores_excluidos)].copy()
-    df_joel = df_joel.loc[(df_joel['ev_ebit'] > 0) & (df_joel['roic'] > 0)].copy()
+    # Earnings Yield (seguro)
+    df['earning_yield'] = np.where(df['ev_ebit'] > 0, 1 / df['ev_ebit'], 0)
     
-    if df_joel.empty:
-        df['RANKING_JOEL'] = np.nan   # ou 9999 se seu front exigir número
-    else:
-        df_joel['earning_yield'] = 1 / df_joel['ev_ebit']
-        df_joel['rank_earning_yield'] = df_joel['earning_yield'].rank(ascending=False, method='dense')
-        df_joel['rank_roic'] = df_joel['roic'].rank(ascending=False, method='dense')
-        df_joel['score_joel'] = df_joel['rank_earning_yield'] + df_joel['rank_roic']
-        df_joel['RANKING_JOEL'] = df_joel['score_joel'].rank(ascending=True, method='dense')
+    # Ranks base
+    df['rank_earning_yield'] = df['earning_yield'].rank(ascending=False, method='dense')
+    df['rank_roic'] = df['roic'].rank(ascending=False, method='dense')
     
-        # evita merge explodir linhas
-        df_joel = df_joel.drop_duplicates(subset=['ativo'])
+    # Score base
+    df['score_joel'] = df['rank_earning_yield'] + df['rank_roic']
     
-        df = df.merge(df_joel[['ativo', 'RANKING_JOEL']], on='ativo', how='left')
+    # Penalização por setor
+    PENALTY = 1_000_000
+    df['penalty_joel'] = np.where(
+        df['setor'].isin(SETORES_JOEL_PENALIZADOS),
+        PENALTY,
+        0
+    )
     
-    # se precisar garantir número pro front ordenar sem NaN:
-    # df['RANKING_JOEL'] = df['RANKING_JOEL'].fillna(9999)
+    # Score final
+    df['score_joel'] = df['score_joel'] + df['penalty_joel']
+    
+    # Ranking final
+    df['RANKING_JOEL'] = df['score_joel'].rank(ascending=True, method='dense')
 
     # --- GRAHAM ---
     def calc_graham(row):
