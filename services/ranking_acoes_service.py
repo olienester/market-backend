@@ -136,35 +136,31 @@ def get_relatorio_geral_acoes():
     setores_excluidos = [
         'Financeiro', 'Bancário', 'Seguros',
         'Energia', 'Utilidade Pública',
-        # opcional se você considerar saneamento como utility:
-        # 'Saneamento'
     ]
     
-    # Universo apenas para o Joel (não mexe no df principal)
-    df_joel = df.loc[~df['setor'].isin(setores_excluidos)].copy()
+    # garante numérico (evita erro em > 0)
+    df['ev_ebit'] = pd.to_numeric(df['ev_ebit'], errors='coerce').fillna(0)
+    df['roic']    = pd.to_numeric(df['roic'], errors='coerce').fillna(0)
     
-    # Exigir EV/EBIT e ROIC positivos (equivale a EBIT/EV > 0 e ROC/ROIC > 0)
+    df_joel = df.loc[~df['setor'].isin(setores_excluidos)].copy()
     df_joel = df_joel.loc[(df_joel['ev_ebit'] > 0) & (df_joel['roic'] > 0)].copy()
     
-    # Earnings Yield = EBIT/EV = 1/(EV/EBIT)
-    df_joel['earning_yield'] = 1 / df_joel['ev_ebit']
+    if df_joel.empty:
+        df['RANKING_JOEL'] = np.nan   # ou 9999 se seu front exigir número
+    else:
+        df_joel['earning_yield'] = 1 / df_joel['ev_ebit']
+        df_joel['rank_earning_yield'] = df_joel['earning_yield'].rank(ascending=False, method='dense')
+        df_joel['rank_roic'] = df_joel['roic'].rank(ascending=False, method='dense')
+        df_joel['score_joel'] = df_joel['rank_earning_yield'] + df_joel['rank_roic']
+        df_joel['RANKING_JOEL'] = df_joel['score_joel'].rank(ascending=True, method='dense')
     
-    # Rankings separados (dense evita “buracos” quando há empates)
-    df_joel['rank_earning_yield'] = df_joel['earning_yield'].rank(ascending=False, method='dense')
-    df_joel['rank_roic'] = df_joel['roic'].rank(ascending=False, method='dense')
+        # evita merge explodir linhas
+        df_joel = df_joel.drop_duplicates(subset=['ativo'])
     
-    # Soma dos ranks (menor é melhor)
-    df_joel['score_joel'] = df_joel['rank_earning_yield'] + df_joel['rank_roic']
+        df = df.merge(df_joel[['ativo', 'RANKING_JOEL']], on='ativo', how='left')
     
-    # Ranking final
-    df_joel['RANKING_JOEL'] = df_joel['score_joel'].rank(ascending=True, method='dense')
-    
-    # “Traz de volta” pro df principal
-    df = df.merge(
-        df_joel[['ativo', 'RANKING_JOEL']],
-        on='ativo',
-        how='left'
-    )
+    # se precisar garantir número pro front ordenar sem NaN:
+    # df['RANKING_JOEL'] = df['RANKING_JOEL'].fillna(9999)
 
     # --- GRAHAM ---
     def calc_graham(row):
