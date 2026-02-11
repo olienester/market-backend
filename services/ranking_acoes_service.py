@@ -130,11 +130,41 @@ def get_relatorio_geral_acoes():
     # ==============================================================================
     # CÁLCULO DE TODOS OS RANKINGS (Mesma lógica anterior, tudo junto)
     # ==============================================================================
+
+    # --- JOEL (Magic Formula - adaptação usando ROIC do Fundamentus) ---
     
-    # --- JOEL ---
-    df['earning_yield'] = df['ev_ebit'].apply(lambda x: 1/x if x > 0 else 0)
-    df['score_joel'] = df['earning_yield'].rank(ascending=False) + df['roic'].rank(ascending=False)
-    df['RANKING_JOEL'] = df['score_joel'].rank(ascending=True)
+    setores_excluidos = [
+        'Financeiro', 'Bancário', 'Seguros',
+        'Energia', 'Utilidade Pública',
+        # opcional se você considerar saneamento como utility:
+        # 'Saneamento'
+    ]
+    
+    # Universo apenas para o Joel (não mexe no df principal)
+    df_joel = df.loc[~df['setor'].isin(setores_excluidos)].copy()
+    
+    # Exigir EV/EBIT e ROIC positivos (equivale a EBIT/EV > 0 e ROC/ROIC > 0)
+    df_joel = df_joel.loc[(df_joel['ev_ebit'] > 0) & (df_joel['roic'] > 0)].copy()
+    
+    # Earnings Yield = EBIT/EV = 1/(EV/EBIT)
+    df_joel['earning_yield'] = 1 / df_joel['ev_ebit']
+    
+    # Rankings separados (dense evita “buracos” quando há empates)
+    df_joel['rank_earning_yield'] = df_joel['earning_yield'].rank(ascending=False, method='dense')
+    df_joel['rank_roic'] = df_joel['roic'].rank(ascending=False, method='dense')
+    
+    # Soma dos ranks (menor é melhor)
+    df_joel['score_joel'] = df_joel['rank_earning_yield'] + df_joel['rank_roic']
+    
+    # Ranking final
+    df_joel['RANKING_JOEL'] = df_joel['score_joel'].rank(ascending=True, method='dense')
+    
+    # “Traz de volta” pro df principal
+    df = df.merge(
+        df_joel[['ativo', 'RANKING_JOEL']],
+        on='ativo',
+        how='left'
+    )
 
     # --- GRAHAM ---
     def calc_graham(row):
