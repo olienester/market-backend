@@ -60,14 +60,38 @@ def fetch_fundamentus_acoes():
     url = 'https://www.fundamentus.com.br/resultado.php'
     
     try:
-        scraper = cloudscraper.create_scraper()
-        response = scraper.get(url)
+        # 1. Forçando o scraper a imitar um Chrome atualizado no Windows
+        scraper = cloudscraper.create_scraper(
+            browser={
+                'browser': 'chrome',
+                'platform': 'windows',
+                'desktop': True
+            }
+        )
+        
+        # 2. Injetando Headers reais (O Fundamentus costuma bloquear requisições sem isso)
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+            'Connection': 'keep-alive',
+            'Referer': 'https://www.fundamentus.com.br/'
+        }
+
+        response = scraper.get(url, headers=headers, timeout=15)
         
         if response.status_code != 200:
             raise Exception(f"Status Code: {response.status_code}")
+            
+        # 3. Verificação de segurança: checar se caiu na página de "Verificação humana" do Cloudflare
+        if "Cloudflare" in response.text or "Just a moment" in response.text or "desafio" in response.text.lower():
+            raise Exception("Bloqueio do Cloudflare detectado! O site não entregou a tabela de dados.")
         
         # O Fundamentus usa table[0] para ações
-        df = pd.read_html(io.BytesIO(response.content), decimal=',', thousands='.')[0]
+        try:
+            df = pd.read_html(io.BytesIO(response.content), decimal=',', thousands='.')[0]
+        except ValueError as ve:
+            raise Exception(f"Erro ao ler tabela HTML (A estrutura do site pode ter mudado): {ve}")
 
         # Renomear colunas
         rename_map = {
@@ -87,7 +111,6 @@ def fetch_fundamentus_acoes():
         df.rename(columns=rename_map, inplace=True)
 
         # === AQUI APLICAMOS O SEU MAPA DE SETORES ===
-        # Se o ativo estiver no dicionário, pega o setor. Se não, coloca "Outros".
         df['setor'] = df['ativo'].map(MAPA_SETORES).fillna('Outros')
 
         # Limpeza de Strings (% e pontos)
@@ -109,8 +132,10 @@ def fetch_fundamentus_acoes():
         return df
 
     except Exception as e:
-        print(f"Erro scraping ações: {e}")
-        if _cache_acoes["data"] is not None: return _cache_acoes["data"]
+        # Agora o erro vai aparecer muito mais detalhado no seu terminal/logs
+        print(f"❌ Erro scraping ações: {e}")
+        if _cache_acoes["data"] is not None: 
+            return _cache_acoes["data"]
         return pd.DataFrame()
 
 def get_relatorio_geral_acoes():
