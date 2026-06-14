@@ -106,7 +106,7 @@ def fetch_fundamentus_acoes():
             'Liq.2meses': 'liq_media_diaria',
             'Mrg. Líq.': 'margem_liquida',
             'Cresc. Rec.5a': 'cagr_lucros_5a',
-            'Dív.Brut/ Patrim.': 'div_liq_patrimonio'
+            'Dív.Líq/ Patrim.': 'div_liq_patrimonio'
         }
         df.rename(columns=rename_map, inplace=True)
 
