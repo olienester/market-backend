@@ -232,5 +232,10 @@ def get_relatorio_geral_acoes():
         'valor_intrinseco', 'preco_teto_bazin'
     ]
     
+    # ---> A CORREÇÃO ENTRA AQUI <---
+    # Troca Infinity gerado por divisões por 0 (ex: 1/ev_ebit) e valores vazios por 0
+    df = df.replace([np.inf, -np.inf], 0)
+    df = df.fillna(0)
+    
     # Retorna TUDO (sem limite de 30) para o App filtrar
     return df[cols].to_dict(orient='records')
